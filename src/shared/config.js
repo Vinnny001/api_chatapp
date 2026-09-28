@@ -20,6 +20,8 @@ export const config = {
   // Must match the realtime service's JWT_SECRET: it verifies the tokens issued here.
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
+  // Country code assumed for local numbers like "0712..." (254 = Kenya).
+  defaultCountryCode: (process.env.DEFAULT_COUNTRY_CODE || '254').replace(/\D/g, ''),
   // Private endpoint of the realtime service used to push events to connected clients.
   realtimeInternalUrl: (process.env.REALTIME_INTERNAL_URL || 'http://localhost:5051').replace(/\/+$/, ''),
   internalSecret: required('INTERNAL_SECRET'),

@@ -30,6 +30,8 @@ npm run dev              # http://localhost:5050
 | POST | `/api/conversations/:id/clear` | Clear chat for me |
 | GET / POST | `/api/messages/starred`, `/api/messages/:id/star` | Stars |
 | POST | `/api/uploads` | Multipart `file` field, returns `{ url, name, size, mime }` |
+| POST | `/api/users/lookup` | `{ phones: [...] }` → which numbers belong to registered users (contacts sync, tapped numbers) |
+| POST | `/api/conversations/:id/messages` | Send over HTTP (used by the Android background sender); same `clientId` is never stored twice |
 
 Every route except auth needs `Authorization: Bearer <token>`.
 
@@ -38,6 +40,10 @@ Every route except auth needs `Authorization: Bearer <token>`.
 If the `CLOUDINARY_*` variables are set, uploads are stored in Cloudinary (folder `CLOUDINARY_FOLDER`) and the response `url` is a permanent `https://res.cloudinary.com/...` link. Use this on Render and other hosts whose disk is wiped on redeploy. Without them, files are saved to local `uploads/` and served from `/uploads/...`, which is fine for development.
 
 Cloudinary free-plan limits: images and documents up to 10 MB, video and audio up to 100 MB (the API also enforces `MAX_UPLOAD_MB`). PDF and ZIP downloads only work once *Settings → Security → Allow delivery of PDF and ZIP files* is enabled in the Cloudinary console.
+
+## Phone numbers
+
+New accounts store numbers in international form (`+2547...`). Login, search, duplicate checks and `/lookup` accept any spelling (`0712...`, `254712...`, `+254 712 ...`) and also match older accounts saved as `07...`. Local numbers are assumed to use `DEFAULT_COUNTRY_CODE` (default `254`).
 
 ## Shared code
 

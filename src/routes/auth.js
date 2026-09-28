@@ -5,11 +5,16 @@ import { z } from 'zod';
 import { User, publicUser, signToken } from '#shared';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, handle } from '../middleware/errors.js';
+import { normalizePhone, phoneVariants } from '../phone.js';
 
-export const phoneSchema = z
+// Stored in international form (+2547...) so every account's number has one spelling.
+const phoneSchema = z
   .string()
-  .transform((s) => s.replace(/[\s()-]/g, ''))
-  .pipe(z.string().regex(/^\+?[0-9]{7,15}$/, 'Enter a valid phone number'));
+  .transform((s, ctx) => {
+    const phone = normalizePhone(s);
+    if (!phone) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter a valid phone number' });
+    return phone ?? z.NEVER;
+  });
 
 const signupSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(60),
@@ -33,7 +38,9 @@ router.post(
   authLimiter,
   handle(async (req, res) => {
     const data = signupSchema.parse(req.body);
-    const existing = await User.findOne({ $or: [{ email: data.email }, { phone: data.phone }] }).lean();
+    const existing = await User.findOne({
+      $or: [{ email: data.email }, { phone: { $in: phoneVariants(data.phone) } }],
+    }).lean();
     if (existing) throw new HttpError(409, 'Email or phone number already in use');
 
     const user = await User.create({
@@ -52,10 +59,10 @@ router.post(
   authLimiter,
   handle(async (req, res) => {
     const { identifier, password } = loginSchema.parse(req.body);
-    const phone = identifier.replace(/[\s()-]/g, '');
-    const user = await User.findOne({ $or: [{ email: identifier.toLowerCase() }, { phone }] }).select(
-      '+passwordHash'
-    );
+    // Accept the phone in any format ("07..", "+2547..") and older accounts' stored spelling.
+    const user = await User.findOne({
+      $or: [{ email: identifier.toLowerCase() }, { phone: { $in: phoneVariants(identifier) } }],
+    }).select('+passwordHash');
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       throw new HttpError(400, 'Invalid credentials');
     }

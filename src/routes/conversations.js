@@ -7,6 +7,8 @@ import {
   Message,
   REPLY_POPULATE,
   User,
+  canSend,
+  createMessage,
   createSystemMessage,
   escapeRegex,
   findConversationForUser,
@@ -345,6 +347,54 @@ router.get(
     const hasMore = docs.length > limit;
     const page = docs.slice(0, limit).reverse();
     res.json({ messages: page.map((m) => serializeMessage(m, req.userId)), hasMore });
+  })
+);
+
+const sendSchema = z
+  .object({
+    clientId: z.string().min(8).max(64),
+    type: z.enum(['text', 'image', 'video', 'audio', 'voice', 'file']).default('text'),
+    text: z.string().max(10000).default(''),
+    media: z
+      .object({
+        url: uploadUrl,
+        name: z.string().max(200).optional(),
+        size: z.number().nonnegative().optional(),
+        mime: z.string().max(100).optional(),
+        duration: z.number().nonnegative().max(24 * 3600).optional(),
+      })
+      .optional(),
+    replyTo: objectId.nullish(),
+    forwarded: z.boolean().optional(),
+  })
+  .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 : !!d.media), 'Message is empty');
+
+/**
+ * Send over plain HTTP. The app normally sends through the realtime socket; this is used
+ * by the Android background worker to deliver queued messages while the app is closed.
+ * Same clientId = same message, so a message sent both ways is only stored once.
+ */
+router.post(
+  '/:id/messages',
+  handle(async (req, res) => {
+    const data = sendSchema.parse(req.body);
+    const conv = await loadForUser(req);
+    if (!canSend(conv, req.userId)) throw new HttpError(403, 'Only admins can send messages to this group');
+
+    const replyTo =
+      data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conv._id })) ? data.replyTo : null;
+    const { message, duplicate } = await createMessage({
+      conversation: conv,
+      senderId: req.userId,
+      type: data.type,
+      text: data.text,
+      media: data.media,
+      replyTo,
+      forwarded: data.forwarded,
+      clientId: data.clientId,
+    });
+    if (!duplicate) broadcastMessage(message, conv);
+    res.status(duplicate ? 200 : 201).json({ message: serializeMessage(message, req.userId), duplicate });
   })
 );
 
