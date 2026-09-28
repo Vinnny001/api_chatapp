@@ -41,8 +41,15 @@ for (const row of users) {
   }
   userIdByPhone.set(String(row.phone_number), user._id);
   userIdByPhone.set(phone, user._id);
+  // Some versions of the old app identified people by email instead of phone.
+  userIdByPhone.set(email, user._id);
 }
 console.log(`users: ${users.length} found, ${createdUsers} created`);
+
+const lookupUser = (id) =>
+  userIdByPhone.get(String(id)) ||
+  userIdByPhone.get(normalizePhone(id)) ||
+  userIdByPhone.get(String(id ?? '').toLowerCase().trim());
 
 // 2) Old delivery/read state, keyed by the old Mongo message id.
 const [statusRows] = await sql.query('SELECT mongo_id, status FROM message_status');
@@ -62,8 +69,8 @@ let migrated = 0;
 let skipped = 0;
 
 for await (const doc of legacy) {
-  const senderId = userIdByPhone.get(String(doc.sender)) || userIdByPhone.get(normalizePhone(doc.sender));
-  const receiverId = userIdByPhone.get(String(doc.receiver)) || userIdByPhone.get(normalizePhone(doc.receiver));
+  const senderId = lookupUser(doc.sender);
+  const receiverId = lookupUser(doc.receiver);
   if (!senderId || !receiverId || String(senderId) === String(receiverId)) {
     skipped++;
     continue;
@@ -115,13 +122,16 @@ for await (const doc of legacy) {
   if (status !== 'read') s.unread++;
   entry.state.set(String(receiverId), s);
   entry.last = { id: message._id, at };
+  entry.first = entry.first && entry.first < at ? entry.first : at;
 }
 
 // 4) Receipt watermarks, unread counters and last message per conversation.
-for (const { conv, state, last } of convs.values()) {
+for (const { conv, state, last, first } of convs.values()) {
   if (!last) continue;
   const fresh = await Conversation.findById(conv._id);
   for (const p of fresh.participants) {
+    // Older messages may be imported on a later run; members joined no later than the first one.
+    if (first < p.joinedAt) p.joinedAt = first;
     const s = state.get(String(p.user));
     if (!s) continue;
     if (s.read && s.read > p.lastReadAt) p.lastReadAt = s.read;
