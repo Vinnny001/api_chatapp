@@ -30,6 +30,13 @@ export const config = {
   ),
   uploadDir: path.resolve(root, process.env.UPLOAD_DIR || 'uploads'),
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 25),
+  // When set, uploads are stored in Cloudinary instead of local disk.
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiSecret: process.env.CLOUDINARY_API_SECRET,
+    folder: process.env.CLOUDINARY_FOLDER || 'chatapp',
+  },
 };
 
 export function corsOriginOption() {

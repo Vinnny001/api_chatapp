@@ -6,8 +6,10 @@ export const rooms = {
   conv: (id) => `conv:${id}`,
 };
 
-// Media/avatars must point at files served by the API's own /uploads route.
-export const UPLOAD_URL_PATTERN = /^\/uploads\/[\w.-]+$/;
+// Media/avatars must be files uploaded through the API: either Cloudinary delivery URLs
+// (production) or the API's own /uploads route (local development without Cloudinary).
+export const UPLOAD_URL_PATTERN =
+  /^(\/uploads\/[\w.-]+|https:\/\/res\.cloudinary\.com\/[\w-]+\/(image|video|raw)\/upload\/[\w/.,=-]+)$/;
 
 export const INTERNAL_EVENTS_PATH = '/internal/events';
 
