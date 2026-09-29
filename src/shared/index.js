@@ -9,3 +9,4 @@ export { Conversation } from './models/Conversation.js';
 export { Message, MESSAGE_TYPES } from './models/Message.js';
 export * from './serialize.js';
 export * from './services.js';
+export { initPush, pushNewMessage } from './push.js';

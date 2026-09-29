@@ -13,6 +13,12 @@ const userSchema = new mongoose.Schema(
     settings: {
       showLastSeen: { type: Boolean, default: true },
     },
+    // Phones signed in to this account, for push notifications (Firebase Cloud Messaging).
+    devices: {
+      type: [{ _id: false, token: String, platform: String, updatedAt: Date }],
+      default: [],
+      select: false,
+    },
   },
   { timestamps: true }
 );

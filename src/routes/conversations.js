@@ -10,6 +10,7 @@ import {
   canSend,
   createMessage,
   createSystemMessage,
+  pushNewMessage,
   escapeRegex,
   findConversationForUser,
   sameId,
@@ -393,7 +394,10 @@ router.post(
       forwarded: data.forwarded,
       clientId: data.clientId,
     });
-    if (!duplicate) broadcastMessage(message, conv);
+    if (!duplicate) {
+      broadcastMessage(message, conv);
+      pushNewMessage(message, conv);
+    }
     res.status(duplicate ? 200 : 201).json({ message: serializeMessage(message, req.userId), duplicate });
   })
 );

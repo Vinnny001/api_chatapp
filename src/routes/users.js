@@ -64,6 +64,34 @@ router.post(
   })
 );
 
+const deviceSchema = z.object({
+  token: z.string().min(20).max(4096),
+  platform: z.enum(['android', 'ios', 'web']).default('android'),
+});
+
+/** Registers this phone for push notifications (a token belongs to one account at a time). */
+router.post(
+  '/me/devices',
+  handle(async (req, res) => {
+    const { token, platform } = deviceSchema.parse(req.body);
+    await User.updateMany({ 'devices.token': token }, { $pull: { devices: { token } } });
+    await User.updateOne(
+      { _id: req.userId },
+      { $push: { devices: { $each: [{ token, platform, updatedAt: new Date() }], $slice: -10 } } }
+    );
+    res.status(201).json({ ok: true });
+  })
+);
+
+/** Signing out on this phone: stop sending it notifications for this account. */
+router.delete(
+  '/me/devices/:token',
+  handle(async (req, res) => {
+    await User.updateOne({ _id: req.userId }, { $pull: { devices: { token: req.params.token } } });
+    res.json({ ok: true });
+  })
+);
+
 router.patch(
   '/me',
   handle(async (req, res) => {

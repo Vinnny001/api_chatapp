@@ -56,3 +56,7 @@ npm run migrate:mysql
 ```
 
 This reads the old MySQL users (`DB_*`) and the old MongoDB messages (`LEGACY_MONGO_URI`, or `MONGO_URI` if that's not set), then writes them into `MONGO_URI`. Old passwords keep working, and it's safe to run more than once.
+
+## Push notifications
+
+New messages are pushed to the recipients' phones through Firebase Cloud Messaging, so they arrive as pop-up notifications even when the app is closed. Muted chats and the sender's own devices are skipped. Set `FIREBASE_SERVICE_ACCOUNT` to the service-account key from Firebase (*Project settings → Service accounts → Generate new private key*): paste the whole JSON on one line, or base64-encode it. Set the same value on both **chat-api** and **chat-realtime**. Without it, the service runs normally but sends no notifications.
