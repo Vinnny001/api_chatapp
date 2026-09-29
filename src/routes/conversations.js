@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   Conversation,
   EVENTS,
+  MAX_TEXT_LENGTH,
   Message,
   REPLY_POPULATE,
   User,
@@ -11,6 +12,7 @@ import {
   createMessage,
   createSystemMessage,
   pushNewMessage,
+  pushRead,
   escapeRegex,
   findConversationForUser,
   sameId,
@@ -23,6 +25,7 @@ import { uploadUrl } from './users.js';
 import {
   broadcastConversation,
   broadcastMessage,
+  emitToConversations,
   emitToUser,
   removeUserFromConversation,
 } from '../realtime.js';
@@ -95,6 +98,22 @@ router.get(
       Conversation.find({ 'participants.user': req.userId }).sort({ lastMessageAt: -1 })
     );
     res.json({ conversations: convs.map((c) => serializeConversation(c, req.userId)) });
+  })
+);
+
+/** Call history (the Calls tab): the latest calls across all of my chats. */
+router.get(
+  '/calls',
+  handle(async (req, res) => {
+    const mine = await Conversation.find({ 'participants.user': req.userId }, '_id').lean();
+    const docs = await Message.find({
+      conversation: { $in: mine.map((c) => c._id) },
+      type: 'call',
+      deletedFor: { $ne: req.userId },
+    })
+      .sort({ createdAt: -1 })
+      .limit(Math.min(Number(req.query.limit) || 100, 200));
+    res.json({ calls: docs.map((m) => serializeMessage(m, req.userId)) });
   })
 );
 
@@ -239,6 +258,44 @@ router.post(
   })
 );
 
+/**
+ * Mark read over plain HTTP: the "Mark as read" button on a notification, which works
+ * without opening the app. Same rules as the realtime service's conversation:read.
+ */
+router.post(
+  '/:id/read',
+  handle(async (req, res) => {
+    const { upTo } = z.object({ upTo: z.string().datetime().optional() }).parse(req.body || {});
+    const conv = await loadForUser(req);
+    const at = new Date(Math.min(upTo ? Date.parse(upTo) : Date.now(), Date.now()));
+    for (const field of ['lastDeliveredAt', 'lastReadAt']) {
+      await Conversation.updateOne(
+        { _id: conv._id, participants: { $elemMatch: { user: req.userId, [field]: { $lt: at } } } },
+        { $set: { [`participants.$.${field}`]: at } }
+      );
+    }
+    const unreadCount = await Message.countDocuments({
+      conversation: conv._id,
+      sender: { $ne: req.userId },
+      createdAt: { $gt: at },
+      $nor: [{ type: 'call', 'call.status': { $ne: 'missed' } }],
+    });
+    await Conversation.updateOne(
+      { _id: conv._id, 'participants.user': req.userId },
+      { $set: { 'participants.$.unreadCount': unreadCount } }
+    );
+    emitToConversations([String(conv._id)], EVENTS.RECEIPT, {
+      conversationId: String(conv._id),
+      userId: req.userId,
+      kind: 'read',
+      at,
+      unreadCount,
+    });
+    if (unreadCount === 0) pushRead(req.userId, String(conv._id));
+    res.json({ unreadCount });
+  })
+);
+
 router.post(
   '/:id/members',
   handle(async (req, res) => {
@@ -355,7 +412,7 @@ const sendSchema = z
   .object({
     clientId: z.string().min(8).max(64),
     type: z.enum(['text', 'image', 'video', 'audio', 'voice', 'file']).default('text'),
-    text: z.string().max(10000).default(''),
+    text: z.string().max(MAX_TEXT_LENGTH).default(''),
     media: z
       .object({
         url: uploadUrl,

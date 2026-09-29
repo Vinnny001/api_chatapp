@@ -32,6 +32,8 @@ export async function createMessage({
   replyTo = null,
   forwarded = false,
   clientId,
+  call,
+  countsAsUnread = true, // false for call log entries the recipient already saw (answered/declined)
 }) {
   const expiresAt =
     conversation.disappearingSeconds > 0
@@ -49,6 +51,7 @@ export async function createMessage({
       media,
       replyTo,
       forwarded,
+      call,
       expiresAt,
     });
   } catch (err) {
@@ -68,11 +71,10 @@ export async function createMessage({
     set['participants.$[me].unreadCount'] = 0;
     arrayFilters.push({ 'me.user': senderId });
   }
-  await Conversation.updateOne(
-    { _id: conversation._id },
-    { $set: set, $inc: { 'participants.$[other].unreadCount': 1 } },
-    { arrayFilters }
-  );
+  const update = countsAsUnread ? { $set: set, $inc: { 'participants.$[other].unreadCount': 1 } } : { $set: set };
+  await Conversation.updateOne({ _id: conversation._id }, update, {
+    arrayFilters: countsAsUnread ? arrayFilters : arrayFilters.filter((f) => !('other.user' in f)),
+  });
 
   if (replyTo) await message.populate(REPLY_POPULATE);
   return { message, duplicate: false };

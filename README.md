@@ -60,3 +60,7 @@ This reads the old MySQL users (`DB_*`) and the old MongoDB messages (`LEGACY_MO
 ## Push notifications
 
 New messages are pushed to the recipients' phones through Firebase Cloud Messaging, so they arrive as pop-up notifications even when the app is closed. Muted chats and the sender's own devices are skipped. Set `FIREBASE_SERVICE_ACCOUNT` to the service-account key from Firebase (*Project settings → Service accounts → Generate new private key*): paste the whole JSON on one line, or base64-encode it. Set the same value on both **chat-api** and **chat-realtime**. Without it, the service runs normally but sends no notifications.
+
+The pushes are data-only: the Android app builds the notifications itself (one per chat that stacks its messages with the sender's photo, Reply and Mark as read buttons; a ringing full-screen notification for calls). Besides new messages the services push `read` (clears a chat's notification on your other phones), `call` (rings the phone) and `call_end` (stops the ringing; shows "Missed call" when unanswered).
+
+Endpoints used by those notification buttons: `POST /api/conversations/:id/read` (Mark as read) and the normal send endpoint (Reply). `GET /api/conversations/calls` returns the call history (the app's Calls list). Messages can be up to 65,536 characters.

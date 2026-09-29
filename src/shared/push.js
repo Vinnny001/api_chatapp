@@ -3,10 +3,11 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { User } from './models/User.js';
 import { idOf } from './serialize.js';
 
-// Push notifications through Firebase Cloud Messaging, so phones are told about new messages
-// even when the app is in the background or closed. Enabled when FIREBASE_SERVICE_ACCOUNT is
-// set (the service-account JSON from Firebase console → Project settings → Service accounts,
-// either as raw JSON or base64-encoded).
+// Push notifications through Firebase Cloud Messaging. Android gets *data-only* messages:
+// the app builds WhatsApp-style notifications itself (messages stacked per chat with the
+// sender's photo, Reply / Mark as read buttons, full-screen ringing for calls).
+// Enabled when FIREBASE_SERVICE_ACCOUNT is set (the service-account JSON from Firebase
+// console → Project settings → Service accounts, raw JSON or base64-encoded).
 
 let messaging = null;
 
@@ -25,6 +26,31 @@ export function initPush() {
   }
 }
 
+// Replies from FCM that mean "this token will never work again".
+const DEAD_TOKEN = new Set(['messaging/registration-token-not-registered', 'messaging/invalid-registration-token']);
+
+/** Sends a data message (all values strings) to every registered phone of these users. */
+async function pushData(userIds, data, { ttlSeconds = 4 * 7 * 24 * 3600, collapseKey } = {}) {
+  if (!messaging || !userIds.length) return;
+  const users = await User.find({ _id: { $in: userIds }, 'devices.0': { $exists: true } }, '+devices').lean();
+  const tokens = users.flatMap((u) => (u.devices || []).map((d) => d.token)).filter(Boolean);
+  if (!tokens.length) return;
+  const payload = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v == null ? '' : String(v)]));
+  const result = await messaging.sendEachForMulticast({
+    tokens,
+    data: payload,
+    android: { priority: 'high', ttl: ttlSeconds * 1000, ...(collapseKey && { collapseKey }) },
+    apns: { headers: { 'apns-priority': '10' }, payload: { aps: { contentAvailable: true } } },
+  });
+  const dead = result.responses
+    .map((r, i) => (!r.success && DEAD_TOKEN.has(r.error?.code) ? tokens[i] : null))
+    .filter(Boolean);
+  if (dead.length) await User.updateMany({}, { $pull: { devices: { token: { $in: dead } } } });
+}
+
+const safely = (fn) => (...args) =>
+  fn(...args).catch((err) => console.error('[push] failed:', err.message)); // never break sending
+
 const LABELS = { image: '📷 Photo', video: '🎥 Video', voice: '🎤 Voice message', audio: '🎵 Audio' };
 
 function previewOf(message) {
@@ -34,56 +60,64 @@ function previewOf(message) {
   return message.text ? `${label}: ${message.text}` : label;
 }
 
-// Replies from FCM that mean "this token will never work again".
-const DEAD_TOKEN = new Set(['messaging/registration-token-not-registered', 'messaging/invalid-registration-token']);
+/** New message → the other members' phones (not muted chats, not the sender). */
+export const pushNewMessage = safely(async (message, conversation) => {
+  if (message.type === 'system' || message.type === 'call') return;
+  const senderId = idOf(message.sender);
+  const recipientIds = conversation.participants
+    .filter((p) => idOf(p.user) !== senderId && !p.muted)
+    .map((p) => idOf(p.user));
+  if (!recipientIds.length) return;
+  const sender = await User.findById(senderId, 'name avatarUrl').lean();
+  const isGroup = conversation.type === 'group';
+  await pushData(recipientIds, {
+    type: 'message',
+    conversationId: idOf(conversation),
+    messageId: idOf(message),
+    isGroup: isGroup ? '1' : '0',
+    chatTitle: isGroup ? conversation.name : sender?.name,
+    chatAvatar: isGroup ? conversation.avatarUrl : sender?.avatarUrl,
+    senderId,
+    senderName: sender?.name || 'Someone',
+    senderAvatar: sender?.avatarUrl,
+    text: previewOf(message).slice(0, 1000),
+    sentAt: new Date(message.createdAt).getTime(),
+  });
+});
 
-/**
- * Notifies every other member's phones about a new message (not muted chats, not the
- * sender). High priority + the "messages" channel makes Android show it as a heads-up
- * pop-up. Never throws: a push problem must not affect sending.
- */
-export async function pushNewMessage(message, conversation) {
-  if (!messaging || message.type === 'system') return;
-  try {
-    const senderId = idOf(message.sender);
-    const recipientIds = conversation.participants
-      .filter((p) => idOf(p.user) !== senderId && !p.muted)
-      .map((p) => idOf(p.user));
-    if (!recipientIds.length) return;
+/** You read a chat: clear its notification on your other phones. */
+export const pushRead = safely(async (userId, conversationId) => {
+  await pushData([userId], { type: 'read', conversationId }, { ttlSeconds: 24 * 3600 });
+});
 
-    const [sender, recipients] = await Promise.all([
-      User.findById(senderId, 'name').lean(),
-      User.find({ _id: { $in: recipientIds }, 'devices.0': { $exists: true } }, '+devices').lean(),
-    ]);
-    const tokens = recipients.flatMap((u) => (u.devices || []).map((d) => d.token)).filter(Boolean);
-    if (!tokens.length) return;
+/** Incoming call → ring on the callee's phones (full-screen, Answer / Decline). */
+export const pushIncomingCall = safely(async (calleeId, { callId, conversationId, kind, caller }) => {
+  await pushData(
+    [calleeId],
+    {
+      type: 'call',
+      callId,
+      conversationId,
+      kind,
+      callerId: caller.id,
+      callerName: caller.name || 'Someone',
+      callerAvatar: caller.avatarUrl,
+      sentAt: Date.now(),
+    },
+    { ttlSeconds: 40 } // a call that couldn't be delivered in time must not ring later
+  );
+});
 
-    const senderName = sender?.name || 'Someone';
-    const title = conversation.type === 'group' ? `${senderName} @ ${conversation.name}` : senderName;
-    const conversationId = idOf(conversation);
-    const result = await messaging.sendEachForMulticast({
-      tokens,
-      notification: { title, body: previewOf(message).slice(0, 200) },
-      data: { type: 'message', conversationId, messageId: idOf(message) },
-      android: {
-        priority: 'high',
-        notification: {
-          channelId: 'messages',
-          icon: 'ic_stat_chat',
-          color: '#0b8f6a',
-          sound: 'default',
-          tag: conversationId, // one notification per chat, updated as messages arrive
-          defaultVibrateTimings: true,
-        },
-      },
-      apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default', threadId: conversationId } } },
-    });
-
-    const dead = result.responses
-      .map((r, i) => (!r.success && DEAD_TOKEN.has(r.error?.code) ? tokens[i] : null))
-      .filter(Boolean);
-    if (dead.length) await User.updateMany({}, { $pull: { devices: { token: { $in: dead } } } });
-  } catch (err) {
-    console.error('[push] failed:', err.message);
-  }
-}
+/** The call stopped ringing (answered, declined, cancelled, timed out): stop the ringer. */
+export const pushCallEnded = safely(async (calleeId, { callId, conversationId, kind, status, caller }) => {
+  await pushData([calleeId], {
+    type: 'call_end',
+    callId,
+    conversationId,
+    kind,
+    status, // 'missed' shows a "Missed call" notification
+    callerId: caller.id,
+    callerName: caller.name || 'Someone',
+    callerAvatar: caller.avatarUrl,
+  });
+});

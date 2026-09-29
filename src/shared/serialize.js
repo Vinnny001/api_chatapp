@@ -60,6 +60,7 @@ export function serializeMessage(m, viewerId) {
     media: deleted || !m.media?.url ? null : { ...(m.media.toObject?.() ?? m.media) },
     replyTo: replyPreview(m.replyTo),
     forwarded: !!m.forwarded,
+    call: m.call?.kind ? { kind: m.call.kind, status: m.call.status, duration: m.call.duration || 0 } : null,
     reactions: (m.reactions || []).map((r) => ({ user: idOf(r.user), emoji: r.emoji })),
     deletedForEveryone: deleted,
     editedAt: m.editedAt ?? null,

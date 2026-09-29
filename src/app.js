@@ -17,7 +17,7 @@ export function createApp() {
   // Images/audio are loaded cross-origin by the web and Capacitor apps.
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cors({ origin: corsOriginOption() }));
-  app.use(express.json({ limit: '100kb' }));
+  app.use(express.json({ limit: '1mb' })); // long messages (up to 65,536 characters)
 
   app.get('/health', (_req, res) => res.json({ ok: true, service: 'api' }));
   app.use('/uploads', serveUploads);
