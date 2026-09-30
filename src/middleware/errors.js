@@ -31,6 +31,12 @@ export function errorHandler(err, _req, res, _next) {
   if (err instanceof multer.MulterError) {
     return res.status(413).json({ message: err.message });
   }
+  if (err?.code === 11000) {
+    // Two requests claimed the same unique value at once.
+    const field = Object.keys(err.keyPattern || {})[0];
+    const label = { username: 'That username is taken', email: 'Email already in use', phone: 'Phone number already in use' }[field];
+    return res.status(409).json({ message: label || 'Already in use' });
+  }
   if (err instanceof HttpError) {
     return res.status(err.status).json({ message: err.message, ...(err.details && { errors: err.details }) });
   }

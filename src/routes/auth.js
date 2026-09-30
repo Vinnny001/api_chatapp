@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { User, publicUser, signToken } from '#shared';
+import { User, publicUser, signToken, usernameProblem } from '#shared';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, handle } from '../middleware/errors.js';
 import { normalizePhone, phoneVariants } from '../phone.js';
@@ -16,7 +16,18 @@ const phoneSchema = z
     return phone ?? z.NEVER;
   });
 
+// Optional at sign-up; "@Alice" and " alice" are accepted as "alice".
+export const usernameSchema = z
+  .string()
+  .trim()
+  .transform((s) => s.replace(/^@/, '').toLowerCase())
+  .superRefine((u, ctx) => {
+    const problem = usernameProblem(u);
+    if (problem) ctx.addIssue({ code: z.ZodIssueCode.custom, message: problem });
+  });
+
 const signupSchema = z.object({
+  username: z.union([z.literal(''), usernameSchema]).optional(),
   name: z.string().trim().min(1, 'Name is required').max(60),
   email: z.string().trim().toLowerCase().email('Enter a valid email'),
   phone: phoneSchema,
@@ -42,15 +53,30 @@ router.post(
       $or: [{ email: data.email }, { phone: { $in: phoneVariants(data.phone) } }],
     }).lean();
     if (existing) throw new HttpError(409, 'Email or phone number already in use');
+    if (data.username && (await User.exists({ username: data.username }))) {
+      throw new HttpError(409, 'That username is taken');
+    }
 
     const user = await User.create({
       name: data.name,
+      ...(data.username && { username: data.username }),
       email: data.email,
       phone: data.phone,
       gender: data.gender,
       passwordHash: await bcrypt.hash(data.password, 10),
     });
     res.status(201).json({ token: signToken(user._id), user: publicUser(user, { self: true }) });
+  })
+);
+
+/** Live check while typing a username (sign-up and settings). */
+router.get(
+  '/username/:username',
+  handle(async (req, res) => {
+    const parsed = usernameSchema.safeParse(req.params.username);
+    if (!parsed.success) return res.json({ available: false, reason: parsed.error.issues[0].message });
+    const taken = await User.exists({ username: parsed.data });
+    res.json({ available: !taken, username: parsed.data, reason: taken ? 'That username is taken' : null });
   })
 );
 

@@ -2,29 +2,38 @@ import mongoose from 'mongoose';
 
 // Shapes sent to clients. Both services use these so REST and socket payloads match exactly.
 
-export const USER_FIELDS = 'name phone avatarUrl about lastSeen settings';
+export const USER_FIELDS = 'username phone email avatarUrl about lastSeen settings';
 export const REPLY_POPULATE = { path: 'replyTo', select: 'sender type text media deletedForEveryone' };
 
 export const isObjectId = (v) => v instanceof mongoose.Types.ObjectId;
 export const idOf = (v) => (v == null ? null : String(v._id ?? v));
 export const sameId = (a, b) => a != null && b != null && idOf(a) === idOf(b);
 
+/**
+ * What others may see of a user. The registered name stays private (the app shows the name
+ * the viewer saved them under, else the username, else the phone number). The phone number
+ * is shared only by people without a username or who chose to show it; the email only when
+ * the user chose to. People who already have the number (address book) get it on their device.
+ */
 export function publicUser(u, { self = false } = {}) {
   if (!u) return null;
   if (isObjectId(u)) return { id: idOf(u) };
   const showLastSeen = u.settings?.showLastSeen !== false;
+  const showPhone = !!u.settings?.showPhone;
+  const showEmail = !!u.settings?.showEmail;
   const out = {
     id: idOf(u),
-    name: u.name,
-    phone: u.phone,
+    username: u.username || null,
     avatarUrl: u.avatarUrl ?? null,
     about: u.about ?? '',
     lastSeen: showLastSeen || self ? u.lastSeen ?? null : null,
   };
+  if (self || !u.username || showPhone) out.phone = u.phone;
+  if (self || showEmail) out.email = u.email;
   if (self) {
-    out.email = u.email;
+    out.name = u.name;
     out.gender = u.gender;
-    out.settings = { showLastSeen };
+    out.settings = { showLastSeen, showPhone, showEmail };
   }
   return out;
 }

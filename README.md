@@ -57,6 +57,14 @@ npm run migrate:mysql
 
 This reads the old MySQL users (`DB_*`) and the old MongoDB messages (`LEGACY_MONGO_URI`, or `MONGO_URI` if that's not set), then writes them into `MONGO_URI`. Old passwords keep working, and it's safe to run more than once.
 
+## Usernames and privacy
+
+- A user's registered **name is private**: other people never receive it. They see the name they saved the person under (phone address book, or ChatApp contacts), else the **@username**, else the **phone number**.
+- **Usernames** are optional (at sign-up, or later in Settings) and can be changed. Rules: 3–30 characters; lowercase letters, numbers, `.` and `_`; starts with a letter; doesn't end with `.` or `_`; no `..`. `GET /api/auth/username/:username` checks availability.
+- The **phone number** is shared only by users without a username, or who turn on *Show my phone number* (off by default). The **email** is shared only with *Share my email* (off by default). People who already have the number in their address book still match it through `POST /api/users/lookup`.
+- **Search** (`GET /api/users/search`) finds people by username prefix, by their full phone number, or by a shared email; not by name or part of a number.
+- **Saved contacts**: `GET /api/users/me/contacts`, `PUT /api/users/me/contacts/:userId {name}`, `DELETE /api/users/me/contacts/:userId`.
+
 ## Push notifications
 
 New messages are pushed to the recipients' phones through Firebase Cloud Messaging, so they arrive as pop-up notifications even when the app is closed. Muted chats and the sender's own devices are skipped. Set `FIREBASE_SERVICE_ACCOUNT` to the service-account key from Firebase (*Project settings → Service accounts → Generate new private key*): paste the whole JSON on one line, or base64-encode it. Set the same value on both **chat-api** and **chat-realtime**. Without it, the service runs normally but sends no notifications.

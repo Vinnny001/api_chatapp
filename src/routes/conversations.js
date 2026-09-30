@@ -18,6 +18,7 @@ import {
   sameId,
   serializeConversation,
   serializeMessage,
+  userLabel,
   withConversationRefs,
 } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
@@ -73,9 +74,10 @@ function requireGroupAdmin(conv, userId) {
   if (conv.member(userId)?.role !== 'admin') throw new HttpError(403, 'Only group admins can do that');
 }
 
+/** How people appear in group notices, which every member sees: @username, else the number. */
 async function names(ids) {
-  const users = await User.find({ _id: { $in: ids } }, 'name').lean();
-  const byId = new Map(users.map((u) => [String(u._id), u.name]));
+  const users = await User.find({ _id: { $in: ids } }, 'username phone').lean();
+  const byId = new Map(users.map((u) => [String(u._id), userLabel(u)]));
   return ids.map((id) => byId.get(String(id)) || 'Someone');
 }
 

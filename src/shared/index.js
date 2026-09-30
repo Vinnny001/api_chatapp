@@ -9,4 +9,5 @@ export { Conversation } from './models/Conversation.js';
 export { Message, MESSAGE_TYPES, MAX_TEXT_LENGTH } from './models/Message.js';
 export * from './serialize.js';
 export * from './services.js';
+export * from './people.js';
 export { initPush, pushCallEnded, pushIncomingCall, pushNewMessage, pushRead } from './push.js';

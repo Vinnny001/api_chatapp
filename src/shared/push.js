@@ -2,6 +2,7 @@ import { cert, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { User } from './models/User.js';
 import { idOf } from './serialize.js';
+import { userLabel } from './people.js';
 
 // Push notifications through Firebase Cloud Messaging. Android gets *data-only* messages:
 // the app builds WhatsApp-style notifications itself (messages stacked per chat with the
@@ -68,17 +69,20 @@ export const pushNewMessage = safely(async (message, conversation) => {
     .filter((p) => idOf(p.user) !== senderId && !p.muted)
     .map((p) => idOf(p.user));
   if (!recipientIds.length) return;
-  const sender = await User.findById(senderId, 'name avatarUrl').lean();
+  const sender = await User.findById(senderId, 'username phone avatarUrl').lean();
   const isGroup = conversation.type === 'group';
+  // The phone swaps in the name each recipient saved the sender under (it knows senderId);
+  // otherwise it shows the username, or the number for people without one.
+  const label = userLabel(sender);
   await pushData(recipientIds, {
     type: 'message',
     conversationId: idOf(conversation),
     messageId: idOf(message),
     isGroup: isGroup ? '1' : '0',
-    chatTitle: isGroup ? conversation.name : sender?.name,
+    chatTitle: isGroup ? conversation.name : label,
     chatAvatar: isGroup ? conversation.avatarUrl : sender?.avatarUrl,
     senderId,
-    senderName: sender?.name || 'Someone',
+    senderName: label,
     senderAvatar: sender?.avatarUrl,
     text: previewOf(message).slice(0, 1000),
     sentAt: new Date(message.createdAt).getTime(),
