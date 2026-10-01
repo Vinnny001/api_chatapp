@@ -262,6 +262,32 @@ router.post(
 );
 
 /**
+ * "This phone received the messages up to `upTo`": sent by the Android app as soon as a
+ * message notification arrives, even with ChatApp closed, so the sender sees two ticks.
+ */
+router.post(
+  '/:id/delivered',
+  handle(async (req, res) => {
+    const { upTo } = z.object({ upTo: z.string().datetime().optional() }).parse(req.body || {});
+    const conv = await loadForUser(req);
+    const at = new Date(Math.min(upTo ? Date.parse(upTo) : Date.now(), Date.now()));
+    const result = await Conversation.updateOne(
+      { _id: conv._id, participants: { $elemMatch: { user: req.userId, lastDeliveredAt: { $lt: at } } } },
+      { $set: { 'participants.$.lastDeliveredAt': at } }
+    );
+    if (result.modifiedCount) {
+      emitToConversations([String(conv._id)], EVENTS.RECEIPT, {
+        conversationId: String(conv._id),
+        userId: req.userId,
+        kind: 'delivered',
+        at,
+      });
+    }
+    res.json({ ok: true });
+  })
+);
+
+/**
  * Mark read over plain HTTP: the "Mark as read" button on a notification, which works
  * without opening the app. Same rules as the realtime service's conversation:read.
  */
