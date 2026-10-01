@@ -1,7 +1,7 @@
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { User } from './models/User.js';
-import { idOf } from './serialize.js';
+import { idOf, serializeMessage } from './serialize.js';
 import { userLabel } from './people.js';
 
 // Push notifications through Firebase Cloud Messaging. Android gets *data-only* messages:
@@ -74,7 +74,7 @@ export const pushNewMessage = safely(async (message, conversation) => {
   // The phone swaps in the name each recipient saved the sender under (it knows senderId);
   // otherwise it shows the username, or the number for people without one.
   const label = userLabel(sender);
-  await pushData(recipientIds, {
+  const data = {
     type: 'message',
     conversationId: idOf(conversation),
     messageId: idOf(message),
@@ -84,9 +84,14 @@ export const pushNewMessage = safely(async (message, conversation) => {
     senderId,
     senderName: label,
     senderAvatar: sender?.avatarUrl,
-    text: previewOf(message).slice(0, 1000),
+    text: previewOf(message).slice(0, 500),
     sentAt: new Date(message.createdAt).getTime(),
-  });
+  };
+  // The whole message, so the app can show it straight away even if the phone is offline
+  // when it's opened. Left out when it doesn't fit in a push (FCM allows 4 KB).
+  const full = JSON.stringify(serializeMessage(message));
+  if (Buffer.byteLength(JSON.stringify(data)) + Buffer.byteLength(full) < 3600) data.message = full;
+  await pushData(recipientIds, data);
 });
 
 /** You read a chat: clear its notification on your other phones. */

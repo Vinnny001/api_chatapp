@@ -59,6 +59,9 @@ This reads the old MySQL users (`DB_*`) and the old MongoDB messages (`LEGACY_MO
 
 ## Usernames and privacy
 
+- `POST /api/conversations/direct` with your own id opens your chat with yourself (one member).
+- Message pushes include the whole message (`message`, JSON) when it fits in a push (4 KB), so the phone can show it offline.
+
 - A user's registered **name is private**: other people never receive it. They see the name they saved the person under (phone address book, or ChatApp contacts), else the **@username**, else the **phone number**.
 - **Usernames** are optional (at sign-up, or later in Settings) and can be changed. Rules: 3–30 characters; lowercase letters, numbers, `.` and `_`; starts with a letter; doesn't end with `.` or `_`; no `..`. `GET /api/auth/username/:username` checks availability.
 - The **phone number** is shared only by users without a username, or who turn on *Show my phone number* (off by default). The **email** is shared only with *Share my email* (off by default). People who already have the number in their address book still match it through `POST /api/users/lookup`.

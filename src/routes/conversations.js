@@ -134,8 +134,9 @@ router.post(
   '/direct',
   handle(async (req, res) => {
     const { userId } = z.object({ userId: objectId }).parse(req.body);
-    if (userId === req.userId) throw new HttpError(400, 'You cannot start a chat with yourself');
-    if (!(await User.exists({ _id: userId }))) throw new HttpError(404, 'User not found');
+    // Messaging yourself (notes, links, files to keep) is a one-member direct chat.
+    const self = userId === req.userId;
+    if (!self && !(await User.exists({ _id: userId }))) throw new HttpError(404, 'User not found');
 
     const directKey = [req.userId, userId].sort().join(':');
     let conv = await Conversation.findOne({ directKey });
@@ -145,9 +146,9 @@ router.post(
           type: 'direct',
           directKey,
           createdBy: req.userId,
-          participants: [{ user: req.userId }, { user: userId }],
+          participants: self ? [{ user: req.userId }] : [{ user: req.userId }, { user: userId }],
         });
-        await broadcastConversation(conv._id, { join: [req.userId, userId] });
+        await broadcastConversation(conv._id, { join: self ? [req.userId] : [req.userId, userId] });
       } catch (err) {
         if (err.code !== 11000) throw err;
         conv = await Conversation.findOne({ directKey }); // created concurrently
