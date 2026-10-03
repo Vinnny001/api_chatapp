@@ -59,6 +59,9 @@ This reads the old MySQL users (`DB_*`) and the old MongoDB messages (`LEGACY_MO
 
 ## Usernames and privacy
 
+- Reactions: `POST /api/messages/:id/react {emoji|null}` (also over the realtime socket). The author gets a `reaction` push (and `reaction_removed`); conversations carry `lastReaction` for the chat list.
+- Uploads up to `MAX_UPLOAD_MB` (default 50). Non-media files over Cloudinary's 10 MB limit, and APKs (which Cloudinary refuses), are stored on Cloudinary in parts and served as one download from `GET /files/:id/:name`.
+
 - `POST /api/conversations/direct` with your own id opens your chat with yourself (one member).
 - Message pushes include the whole message (`message`, JSON) when it fits in a push (4 KB), so the phone can show it offline.
 

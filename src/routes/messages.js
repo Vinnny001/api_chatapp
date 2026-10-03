@@ -1,7 +1,18 @@
 import { Router } from 'express';
-import { EVENTS, Message, REPLY_POPULATE, findConversationForUser, sameId, serializeMessage } from '#shared';
+import { z } from 'zod';
+import {
+  EVENTS,
+  Message,
+  REPLY_POPULATE,
+  findConversationForUser,
+  pushReaction,
+  pushReactionRemoved,
+  reactToMessage,
+  sameId,
+  serializeMessage,
+} from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
-import { emitToUser } from '../realtime.js';
+import { emitToConversations, emitToUser } from '../realtime.js';
 
 const router = Router();
 
@@ -31,6 +42,25 @@ router.post(
     const payload = { id: String(message._id), conversationId: String(message.conversation), starred: !starred };
     emitToUser(req.userId, EVENTS.MESSAGE_UPDATED, payload); // keep the user's other devices in sync
     res.json(payload);
+  })
+);
+
+/** React over plain HTTP (the app uses this when its live connection is down). */
+router.post(
+  '/:id/react',
+  handle(async (req, res) => {
+    const { emoji } = z.object({ emoji: z.string().min(1).max(16).nullable() }).parse(req.body);
+    let result;
+    try {
+      result = await reactToMessage({ messageId: req.params.id, userId: req.userId, emoji });
+    } catch (err) {
+      throw new HttpError(err.status || 400, err.message);
+    }
+    const { message, conversation, patch, added, removed, preview } = result;
+    emitToConversations([patch.conversationId], EVENTS.MESSAGE_UPDATED, patch);
+    if (added) pushReaction({ message, conversation, reactorId: req.userId, emoji: added, preview });
+    if (removed) pushReactionRemoved({ message, conversation, reactorId: req.userId });
+    res.json({ reactions: patch.reactions });
   })
 );
 

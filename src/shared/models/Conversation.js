@@ -34,6 +34,18 @@ const conversationSchema = new mongoose.Schema(
     disappearingSeconds: { type: Number, default: 0 },
     lastMessage: { type: ObjectId, ref: 'Message', default: null },
     lastMessageAt: { type: Date, default: Date.now },
+    // The latest reaction, shown in the chat list ("Ann reacted 👍 to: …") until a newer message.
+    lastReaction: {
+      type: {
+        _id: false,
+        user: { type: ObjectId, ref: 'User' },
+        emoji: String,
+        message: { type: ObjectId, ref: 'Message' },
+        preview: String,
+        at: Date,
+      },
+      default: null,
+    },
   },
   { timestamps: true }
 );

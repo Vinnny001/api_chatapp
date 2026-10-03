@@ -9,7 +9,7 @@ export const rooms = {
 // Media/avatars must be files uploaded through the API: either Cloudinary delivery URLs
 // (production) or the API's own /uploads route (local development without Cloudinary).
 export const UPLOAD_URL_PATTERN =
-  /^(\/uploads\/[\w.-]+|https:\/\/res\.cloudinary\.com\/[\w-]+\/(image|video|raw)\/upload\/[\w/.,=-]+)$/;
+  /^(\/uploads\/[\w.-]+|\/files\/[a-f0-9]{24}\/[\w.-]+|https:\/\/res\.cloudinary\.com\/[\w-]+\/(image|video|raw)\/upload\/[\w/.,=-]+)$/;
 
 export const INTERNAL_EVENTS_PATH = '/internal/events';
 

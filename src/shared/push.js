@@ -1,7 +1,7 @@
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { User } from './models/User.js';
-import { idOf, serializeMessage } from './serialize.js';
+import { idOf, messagePreview, serializeMessage } from './serialize.js';
 import { userLabel } from './people.js';
 
 // Push notifications through Firebase Cloud Messaging. Android gets *data-only* messages:
@@ -52,14 +52,7 @@ async function pushData(userIds, data, { ttlSeconds = 4 * 7 * 24 * 3600, collaps
 const safely = (fn) => (...args) =>
   fn(...args).catch((err) => console.error('[push] failed:', err.message)); // never break sending
 
-const LABELS = { image: '📷 Photo', video: '🎥 Video', voice: '🎤 Voice message', audio: '🎵 Audio' };
-
-function previewOf(message) {
-  if (message.type === 'text') return message.text;
-  if (message.type === 'file') return `📄 ${message.media?.name || 'Document'}`;
-  const label = LABELS[message.type] || 'New message';
-  return message.text ? `${label}: ${message.text}` : label;
-}
+const previewOf = messagePreview;
 
 /** New message → the other members' phones (not muted chats, not the sender). */
 export const pushNewMessage = safely(async (message, conversation) => {
@@ -92,6 +85,42 @@ export const pushNewMessage = safely(async (message, conversation) => {
   const full = JSON.stringify(serializeMessage(message));
   if (Buffer.byteLength(JSON.stringify(data)) + Buffer.byteLength(full) < 3600) data.message = full;
   await pushData(recipientIds, data);
+});
+
+/** Someone reacted to my message: "Reacted 👍 to: …" (only the message's author is told). */
+export const pushReaction = safely(async ({ message, conversation, reactorId, emoji, preview }) => {
+  const authorId = idOf(message.sender);
+  if (!authorId || authorId === reactorId) return;
+  const author = conversation.participants.find((p) => idOf(p.user) === authorId);
+  if (!author || author.muted) return;
+  const reactor = await User.findById(reactorId, 'username phone avatarUrl').lean();
+  const isGroup = conversation.type === 'group';
+  const label = userLabel(reactor);
+  await pushData([authorId], {
+    type: 'reaction',
+    conversationId: idOf(conversation),
+    messageId: idOf(message),
+    isGroup: isGroup ? '1' : '0',
+    chatTitle: isGroup ? conversation.name : label,
+    chatAvatar: isGroup ? conversation.avatarUrl : reactor?.avatarUrl,
+    senderId: reactorId,
+    senderName: label,
+    senderAvatar: reactor?.avatarUrl,
+    emoji,
+    text: `Reacted ${emoji} to: “${preview}”`,
+    sentAt: Date.now(),
+  });
+});
+
+/** The reaction was taken back: remove it from the author's notification. */
+export const pushReactionRemoved = safely(async ({ message, conversation, reactorId }) => {
+  const authorId = idOf(message.sender);
+  if (!authorId || authorId === reactorId) return;
+  await pushData(
+    [authorId],
+    { type: 'reaction_removed', conversationId: idOf(conversation), messageId: idOf(message), senderId: reactorId },
+    { ttlSeconds: 24 * 3600 }
+  );
 });
 
 /** You read a chat: clear its notification on your other phones. */

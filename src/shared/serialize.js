@@ -80,6 +80,23 @@ export function serializeMessage(m, viewerId) {
   return out;
 }
 
+const MEDIA_LABELS = { image: '📷 Photo', video: '🎥 Video', voice: '🎤 Voice message', audio: '🎵 Audio' };
+
+/** One-line description of a message (notifications, "reacted to …"). */
+export function messagePreview(message) {
+  if (!message) return '';
+  if (message.type === 'text' || message.type === 'system') return message.text || '';
+  if (message.type === 'file') return `📄 ${message.media?.name || 'Document'}`;
+  if (message.type === 'call') return message.call?.kind === 'video' ? '📹 Video call' : '📞 Voice call';
+  const label = MEDIA_LABELS[message.type] || 'Message';
+  return message.text ? `${label}: ${message.text}` : label;
+}
+
+export function serializeReaction(r) {
+  if (!r?.user) return null;
+  return { user: idOf(r.user), emoji: r.emoji, messageId: idOf(r.message), preview: r.preview || '', at: r.at };
+}
+
 export function serializeConversation(c, viewerId) {
   const me = c.participants.find((p) => sameId(p.user, viewerId));
   const last = c.lastMessage && !isObjectId(c.lastMessage) ? c.lastMessage : null;
@@ -96,6 +113,7 @@ export function serializeConversation(c, viewerId) {
     createdBy: idOf(c.createdBy),
     onlyAdminsCanSend: !!c.onlyAdminsCanSend,
     disappearingSeconds: c.disappearingSeconds || 0,
+    lastReaction: serializeReaction(c.lastReaction),
     participants: c.participants.map((p) => ({
       ...publicUser(p.user),
       role: p.role,

@@ -8,7 +8,7 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
 import messageRoutes from './routes/messages.js';
-import uploadRoutes, { serveUploads } from './routes/uploads.js';
+import uploadRoutes, { serveStoredFile, serveUploads } from './routes/uploads.js';
 
 export function createApp() {
   const app = express();
@@ -21,6 +21,7 @@ export function createApp() {
 
   app.get('/health', (_req, res) => res.json({ ok: true, service: 'api' }));
   app.use('/uploads', serveUploads);
+  app.get('/files/:id/:name', serveStoredFile);
   app.use('/api/uploads', uploadRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/users', requireAuth, userRoutes);

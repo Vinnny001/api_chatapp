@@ -31,7 +31,7 @@ export const config = {
       'http://localhost:5173,http://127.0.0.1:5173,capacitor://localhost,https://localhost,http://localhost'
   ),
   uploadDir: path.resolve(root, process.env.UPLOAD_DIR || 'uploads'),
-  maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 25),
+  maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 50),
   // When set, uploads are stored in Cloudinary instead of local disk.
   cloudinary: {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME,
