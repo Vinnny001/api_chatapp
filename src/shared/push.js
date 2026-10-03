@@ -107,7 +107,9 @@ export const pushReaction = safely(async ({ message, conversation, reactorId, em
     senderName: label,
     senderAvatar: reactor?.avatarUrl,
     emoji,
-    text: `Reacted ${emoji} to: “${preview}”`,
+    preview,
+    // The phone writes "<name you saved> reacted 👍 to: …"; this is the fallback.
+    text: `${label} reacted ${emoji} to: “${preview}”`,
     sentAt: Date.now(),
   });
 });
