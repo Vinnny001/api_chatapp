@@ -103,6 +103,76 @@ router.get(
   })
 );
 
+// ---- Shared media, docs, links and apps (contact/group info "View all", and the Media hub)
+
+const SHARED_KINDS = ['all', 'media', 'docs', 'links', 'apps', 'starred'];
+const APK = { $or: [{ 'media.mime': 'application/vnd.android.package-archive' }, { 'media.name': /\.apk$/i }] };
+const NOT_APK = { 'media.mime': { $ne: 'application/vnd.android.package-archive' }, 'media.name': { $not: /\.apk$/i } };
+const LINK = /(https?:\/\/|www\.)\S+/i;
+
+/** What each tab shows. */
+function kindFilter(kind, userId) {
+  const media = { type: { $in: ['image', 'video'] } };
+  const docs = { type: 'file', ...NOT_APK };
+  const apps = { type: 'file', ...APK };
+  const links = { text: LINK };
+  if (kind === 'media') return media;
+  if (kind === 'docs') return docs;
+  if (kind === 'apps') return apps;
+  if (kind === 'links') return links;
+  if (kind === 'starred') return { starredBy: userId };
+  return { $or: [media, { type: 'file' }, links] };
+}
+
+/** The messages I may see in each chat: since I joined (groups) / since I cleared it. */
+function visibleIn(conversations, userId) {
+  return conversations.map((c) => {
+    const me = c.participants.find((p) => sameId(p.user, userId));
+    const from =
+      c.type === 'direct' ? me?.clearedAt || new Date(0) : new Date(Math.max(+me?.joinedAt || 0, +me?.clearedAt || 0));
+    return { conversation: c._id, createdAt: { $gte: from } };
+  });
+}
+
+/**
+ * GET /api/conversations/shared?kind=all|media|docs|links|apps|starred&q=&before=&conversationId=
+ * Newest first, 60 at a time. Without conversationId it covers all my chats (the Media hub).
+ * `counts=1` adds how many there are of each kind (first page only).
+ */
+router.get(
+  '/shared',
+  handle(async (req, res) => {
+    const kind = SHARED_KINDS.includes(req.query.kind) ? req.query.kind : 'all';
+    const limit = Math.min(Number(req.query.limit) || 60, 100);
+    const conversations = req.query.conversationId
+      ? [await findConversationForUser(String(req.query.conversationId), req.userId)].filter(Boolean)
+      : await Conversation.find({ 'participants.user': req.userId }, 'type participants');
+    if (!conversations.length) return res.json({ items: [], hasMore: false });
+
+    const base = {
+      $and: [{ $or: visibleIn(conversations, req.userId) }],
+      deletedForEveryone: false,
+      deletedFor: { $ne: req.userId },
+      $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: new Date() } }],
+    };
+    const q = String(req.query.q || '').trim();
+    const search = q ? { $or: [{ text: new RegExp(escapeRegex(q), 'i') }, { 'media.name': new RegExp(escapeRegex(q), 'i') }] } : null;
+    const filter = { ...base, $and: [...base.$and, kindFilter(kind, req.userId), ...(search ? [search] : [])] };
+    if (req.query.before) filter.createdAt = { $lt: new Date(String(req.query.before)) };
+
+    const docs = await Message.find(filter).sort({ createdAt: -1 }).limit(limit + 1);
+    const out = { items: docs.slice(0, limit).map((m) => serializeMessage(m, req.userId)), hasMore: docs.length > limit };
+    if (req.query.counts && !req.query.before) {
+      const counts = {};
+      for (const k of SHARED_KINDS) {
+        counts[k] = await Message.countDocuments({ ...base, $and: [...base.$and, kindFilter(k, req.userId)] });
+      }
+      out.counts = counts;
+    }
+    res.json(out);
+  })
+);
+
 /** Call history (the Calls tab): the latest calls across all of my chats. */
 router.get(
   '/calls',
