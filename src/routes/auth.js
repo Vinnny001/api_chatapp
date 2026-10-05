@@ -7,6 +7,7 @@ import { User, config, publicUser, signToken, usernameProblem, verifyAnyToken } 
 import { codeEmail, sendEmail } from '../email.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, handle } from '../middleware/errors.js';
+import { selfView } from '../admin.js';
 import { normalizePhone, phoneVariants } from '../phone.js';
 
 // Stored in international form (+2547...) so every account's number has one spelling.
@@ -80,7 +81,7 @@ async function checkCode(userId, purpose, code) {
 
 /** The answer for an account that still has to confirm its email: a pending login. */
 function pendingSession(user, codeSent) {
-  return { token: signToken(user._id, { pending: true }), user: publicUser(user, { self: true }), verificationRequired: true, codeSent };
+  return { token: signToken(user._id, { pending: true }), user: selfView(user), verificationRequired: true, codeSent };
 }
 
 /** Accepts full and pending logins (the routes where you confirm your email). */
@@ -153,7 +154,7 @@ router.post(
     }
     if (user.disabled) throw new HttpError(403, 'This account has been disabled. Contact support.');
     if (user.emailVerified === false) return res.json(pendingSession(user, await trySendCode(user, 'verify')));
-    res.json({ token: signToken(user._id), user: publicUser(user, { self: true }) });
+    res.json({ token: signToken(user._id), user: selfView(user) });
   })
 );
 
@@ -168,10 +169,10 @@ router.post(
     const { code } = z.object({ code: sixDigits }).parse(req.body);
     const existing = await User.findById(req.userId);
     if (!existing) throw new HttpError(401, 'Account no longer exists');
-    if (existing.emailVerified !== false) return res.json({ token: signToken(existing._id), user: publicUser(existing, { self: true }) });
+    if (existing.emailVerified !== false) return res.json({ token: signToken(existing._id), user: selfView(existing) });
     await checkCode(req.userId, 'verify', code);
     const user = await User.findByIdAndUpdate(req.userId, { $set: { emailVerified: true } }, { new: true });
-    res.json({ token: signToken(user._id), user: publicUser(user, { self: true }) });
+    res.json({ token: signToken(user._id), user: selfView(user) });
   })
 );
 
@@ -224,7 +225,7 @@ router.post(
       { $set: { passwordHash: await bcrypt.hash(password, 10), emailVerified: true } },
       { new: true }
     );
-    res.json({ token: signToken(user._id), user: publicUser(user, { self: true }) });
+    res.json({ token: signToken(user._id), user: selfView(user) });
   })
 );
 
@@ -234,7 +235,7 @@ router.get(
   handle(async (req, res) => {
     const user = await User.findById(req.userId);
     if (!user) throw new HttpError(401, 'Account no longer exists');
-    res.json({ user: publicUser(user, { self: true }) });
+    res.json({ user: selfView(user) });
   })
 );
 

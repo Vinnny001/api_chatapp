@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
 import groupCallRoutes from './routes/groupCalls.js';
+import adminRoutes from './routes/admin.js';
 import messageRoutes from './routes/messages.js';
 import uploadRoutes, { serveStoredFile, serveUploads } from './routes/uploads.js';
 
@@ -29,6 +30,7 @@ export function createApp() {
   app.use('/api/conversations', requireAuth, groupCallRoutes);
   app.use('/api/conversations', requireAuth, conversationRoutes);
   app.use('/api/messages', requireAuth, messageRoutes);
+  app.use('/api/admin', requireAuth, adminRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

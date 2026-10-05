@@ -3,6 +3,7 @@ import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Conversation, EVENTS, Message, UPLOAD_URL_PATTERN, USER_FIELDS, User, escapeRegex, publicUser } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
+import { selfView } from '../admin.js';
 import { broadcastConversation, emitToConversations } from '../realtime.js';
 import { Report } from '../models/Report.js';
 import { phoneVariants } from '../phone.js';
@@ -145,7 +146,7 @@ router.patch(
     // People I blocked don't get my new photo or about.
     const { lastSeen, ...profile } = publicUser(user);
     emitToConversations(convIds.map(String), EVENTS.USER_UPDATED, profile, { exceptUsers: user.blocked || [] });
-    res.json({ user: publicUser(user, { self: true }) });
+    res.json({ user: selfView(user) });
   })
 );
 
@@ -276,7 +277,7 @@ router.get(
     const user = await User.findById(req.params.id);
     if (!user) throw new HttpError(404, 'User not found');
     const self = String(user._id) === req.userId;
-    res.json({ user: publicUser(user, { self, hideLastSeen: !self && (await hidesLastSeen(req.userId)) }) });
+    res.json({ user: self ? selfView(user) : publicUser(user, { hideLastSeen: await hidesLastSeen(req.userId) }) });
   })
 );
 

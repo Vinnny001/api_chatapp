@@ -68,6 +68,10 @@ Emails go through Brevo's HTTP API (Render's free plan blocks SMTP): set `BREVO_
 - `POST|DELETE /api/users/:id/block`, `GET /api/users/me/blocked`. Like WhatsApp, the blocked person isn't told: their messages in the one-to-one chat stay one tick and are never delivered (stored hidden from the blocker), their calls never ring, and they stop seeing the blocker's photo, about, online status and last seen. The blocker can't message or call them until unblocking. Groups aren't affected.
 - `POST /api/users/:id/report {reason, details, conversationId, block}` stores a report with the person's last 5 messages in that chat, for the admin page.
 
+## Admin page
+
+Accounts whose email is in `ADMIN_EMAILS` (comma-separated) see **Admin** in the app's menu. `/api/admin` (admins only): `GET /stats` (users, activity, messages, calls, reports, Cloudinary storage, 14-day series), `GET /users?q=&filter=` and `POST /users/:id/disable {disabled}` (a disabled account is signed out everywhere at once and can't sign in), `GET /reports?status=` and `PATCH /reports/:id {status, disableUser}`, `GET /export/users.csv`. Admins see accounts and reports, never private chats (only the messages attached to a report).
+
 ## Usernames and privacy
 
 - Last seen is reciprocal: a user with `showLastSeen: false` gets `lastSeen: null` for everyone else (conversations, profiles, search, contacts, presence).
