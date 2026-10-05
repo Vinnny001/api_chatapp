@@ -46,6 +46,8 @@ const messageSchema = new mongoose.Schema(
     forwarded: { type: Boolean, default: false },
     reactions: [{ _id: false, user: { type: ObjectId, ref: 'User' }, emoji: String }],
     starredBy: [{ type: ObjectId, ref: 'User' }],
+    // People @mentioned in a group message (text holds "@[label](userId)" tokens).
+    mentions: { type: [{ type: ObjectId, ref: 'User' }], default: undefined },
     deletedFor: [{ type: ObjectId, ref: 'User' }],
     deletedForEveryone: { type: Boolean, default: false },
     editedAt: { type: Date, default: null },

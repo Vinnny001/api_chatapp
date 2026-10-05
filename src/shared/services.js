@@ -1,13 +1,15 @@
+import mongoose from 'mongoose';
 import { Conversation } from './models/Conversation.js';
 import { Message } from './models/Message.js';
 import { User } from './models/User.js';
-import { REPLY_POPULATE, USER_FIELDS, idOf, messagePreview, sameId, serializeReaction } from './serialize.js';
+import { MENTION_TOKEN, REPLY_POPULATE, USER_FIELDS, idOf, messagePreview, sameId, serializeReaction } from './serialize.js';
 
 /** Query helper: a conversation with everything serializeConversation needs. */
 export function withConversationRefs(query) {
   return query
     .populate('participants.user', USER_FIELDS)
-    .populate({ path: 'lastMessage', populate: REPLY_POPULATE });
+    .populate({ path: 'lastMessage', populate: REPLY_POPULATE })
+    .populate({ path: 'pinned.message', select: 'sender type text media call deletedForEveryone' });
 }
 
 export function findConversationForUser(conversationId, userId) {
@@ -37,6 +39,12 @@ export async function createMessage({
   countsAsUnread = true, // false for call log entries the recipient already saw (answered/declined)
   hiddenFrom = [], // people who must never see it (they blocked the sender)
 }) {
+  // @mentions: only members of this group, never the sender.
+  const members = new Set(conversation.participants.map((p) => idOf(p.user)));
+  const mentions =
+    conversation.type === 'group' && text
+      ? [...new Set([...text.matchAll(MENTION_TOKEN)].map((m) => m[2]))].filter((id) => members.has(id) && id !== idOf(senderId))
+      : [];
   const expiresAt =
     conversation.disappearingSeconds > 0
       ? new Date(Date.now() + conversation.disappearingSeconds * 1000)
@@ -55,6 +63,7 @@ export async function createMessage({
       forwarded,
       call,
       expiresAt,
+      ...(mentions.length && { mentions }),
       ...(hiddenFrom.length && { deletedFor: hiddenFrom }),
     });
   } catch (err) {
@@ -80,7 +89,12 @@ export async function createMessage({
     set['participants.$[me].unreadCount'] = 0;
     arrayFilters.push({ 'me.user': senderId });
   }
-  const update = countsAsUnread ? { $set: set, $inc: { 'participants.$[other].unreadCount': 1 } } : { $set: set };
+  const inc = countsAsUnread ? { 'participants.$[other].unreadCount': 1 } : {};
+  if (mentions.length) {
+    inc['participants.$[mentioned].unreadMentions'] = 1;
+    arrayFilters.push({ 'mentioned.user': { $in: mentions.map((id) => new mongoose.Types.ObjectId(id)) } });
+  }
+  const update = Object.keys(inc).length ? { $set: set, $inc: inc } : { $set: set };
   await Conversation.updateOne({ _id: conversation._id }, update, {
     arrayFilters: countsAsUnread ? arrayFilters : arrayFilters.filter((f) => !('other.user' in f)),
   });

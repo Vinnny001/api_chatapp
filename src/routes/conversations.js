@@ -326,7 +326,7 @@ router.post(
     await loadForUser(req);
     await Conversation.updateOne(
       { _id: req.params.id, 'participants.user': req.userId },
-      { $set: { 'participants.$.clearedAt': new Date(), 'participants.$.unreadCount': 0 } }
+      { $set: { 'participants.$.clearedAt': new Date(), 'participants.$.unreadCount': 0, 'participants.$.unreadMentions': 0 } }
     );
     res.json({ conversation: await sendOwnView(req.params.id, req.userId) });
   })
@@ -380,9 +380,10 @@ router.post(
       createdAt: { $gt: at },
       $nor: [{ type: 'call', 'call.status': { $ne: 'missed' } }],
     });
+    const unreadMentions = await Message.countDocuments({ conversation: conv._id, mentions: req.userId, createdAt: { $gt: at } });
     await Conversation.updateOne(
       { _id: conv._id, 'participants.user': req.userId },
-      { $set: { 'participants.$.unreadCount': unreadCount } }
+      { $set: { 'participants.$.unreadCount': unreadCount, 'participants.$.unreadMentions': unreadMentions } }
     );
     emitToConversations([String(conv._id)], EVENTS.RECEIPT, {
       conversationId: String(conv._id),

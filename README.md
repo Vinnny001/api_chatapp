@@ -63,6 +63,11 @@ New accounts confirm their email with a 6-digit code before they can use the app
 
 Emails go through Brevo's HTTP API (Render's free plan blocks SMTP): set `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` (confirmed in Brevo → Senders) and optionally `BREVO_SENDER_NAME`. Without a key, emails are printed to the server log (development).
 
+## @mentions and pinned messages
+
+- Mentions are written in the text as `@[label](userId)` (label = @username or number, never a private name). For group messages the server keeps the members mentioned in `message.mentions`, counts them per member as `me.unreadMentions` (reset when read or cleared) and pushes to them even if they muted the chat. Previews and push text show `@label`. Editing a message doesn't change who was mentioned.
+- `POST|DELETE /api/messages/:id/pin`: up to 3 pins per chat (a 4th replaces the oldest), by anyone who can send there; pinning adds a "… pinned a message" note. Conversations carry `pinned: [{messageId, by, at, sender, type, preview}]`.
+
 ## Block and report
 
 - `POST|DELETE /api/users/:id/block`, `GET /api/users/me/blocked`. Like WhatsApp, the blocked person isn't told: their messages in the one-to-one chat stay one tick and are never delivered (stored hidden from the blocker), their calls never ring, and they stop seeing the blocker's photo, about, online status and last seen. The blocker can't message or call them until unblocking. Groups aren't affected.

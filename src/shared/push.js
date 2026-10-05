@@ -58,8 +58,10 @@ const previewOf = messagePreview;
 export const pushNewMessage = safely(async (message, conversation) => {
   if (message.type === 'system' || message.type === 'call') return;
   const senderId = idOf(message.sender);
+  // Muted chats stay quiet, except for people @mentioned (as on WhatsApp).
+  const mentioned = new Set((message.mentions || []).map(idOf));
   const recipientIds = conversation.participants
-    .filter((p) => idOf(p.user) !== senderId && !p.muted)
+    .filter((p) => idOf(p.user) !== senderId && (!p.muted || mentioned.has(idOf(p.user))))
     .map((p) => idOf(p.user));
   if (!recipientIds.length) return;
   const sender = await User.findById(senderId, 'username phone avatarUrl').lean();

@@ -12,6 +12,7 @@ const participantSchema = new mongoose.Schema(
     lastDeliveredAt: { type: Date, default: Date.now },
     lastReadAt: { type: Date, default: Date.now },
     unreadCount: { type: Number, default: 0 },
+    unreadMentions: { type: Number, default: 0 }, // unread messages that @mention this member
     pinned: { type: Boolean, default: false },
     muted: { type: Boolean, default: false },
     archived: { type: Boolean, default: false },
@@ -34,6 +35,11 @@ const conversationSchema = new mongoose.Schema(
     disappearingSeconds: { type: Number, default: 0 },
     lastMessage: { type: ObjectId, ref: 'Message', default: null },
     lastMessageAt: { type: Date, default: Date.now },
+    // Pinned messages (up to 3, newest last), shown in a bar under the chat header.
+    pinned: {
+      type: [{ _id: false, message: { type: ObjectId, ref: 'Message' }, by: { type: ObjectId, ref: 'User' }, at: Date }],
+      default: undefined,
+    },
     // A group call in progress (LiveKit room). Null when there's none.
     groupCall: {
       type: {

@@ -80,6 +80,7 @@ export function serializeMessage(m, viewerId) {
         }
       : null,
     reactions: (m.reactions || []).map((r) => ({ user: idOf(r.user), emoji: r.emoji })),
+    mentions: (m.mentions || []).map(idOf),
     deletedForEveryone: deleted,
     editedAt: m.editedAt ?? null,
     expiresAt: m.expiresAt ?? null,
@@ -91,10 +92,14 @@ export function serializeMessage(m, viewerId) {
 
 const MEDIA_LABELS = { image: '📷 Photo', video: '🎥 Video', voice: '🎤 Voice message', audio: '🎵 Audio' };
 
+/** "@[label](id)" mention tokens as plain "@label" (notifications, previews). */
+export const MENTION_TOKEN = /@\[([^\]\n]{1,80})\]\(([a-f0-9]{24})\)/g;
+export const plainMentions = (text = '') => text.replace(MENTION_TOKEN, (_, label) => `@${label.replace(/^@/, '')}`);
+
 /** One-line description of a message (notifications, "reacted to …"). */
 export function messagePreview(message) {
   if (!message) return '';
-  if (message.type === 'text' || message.type === 'system') return message.text || '';
+  if (message.type === 'text' || message.type === 'system') return plainMentions(message.text || '');
   if (message.type === 'file') return `📄 ${message.media?.name || 'Document'}`;
   if (message.type === 'call') return message.call?.kind === 'video' ? '📹 Video call' : '📞 Voice call';
   const label = MEDIA_LABELS[message.type] || 'Message';
@@ -131,6 +136,17 @@ export function serializeConversation(c, viewerId) {
     disappearingSeconds: c.disappearingSeconds || 0,
     lastReaction: serializeReaction(c.lastReaction),
     groupCall: serializeGroupCall(c.groupCall),
+    // Pinned messages that still exist (populated by withConversationRefs).
+    pinned: (c.pinned || [])
+      .filter((p) => p.message && !isObjectId(p.message) && !p.message.deletedForEveryone)
+      .map((p) => ({
+        messageId: idOf(p.message),
+        by: idOf(p.by),
+        at: p.at,
+        sender: idOf(p.message.sender),
+        type: p.message.type,
+        preview: messagePreview(p.message).slice(0, 140),
+      })),
     participants: c.participants.map((p) => ({
       ...publicUser(p.user, { hideLastSeen: viewerHidesLastSeen && !sameId(p.user, viewerId) }),
       // Someone who blocked me: no photo, about or last seen for me (as on WhatsApp).
@@ -150,6 +166,7 @@ export function serializeConversation(c, viewerId) {
             c.type === 'direct' &&
             c.participants.some((p) => !sameId(p.user, viewerId) && (me.user?.blocked || []).some((id) => sameId(id, p.user))),
           role: me.role,
+          unreadMentions: me.unreadMentions || 0,
           pinned: !!me.pinned,
           muted: !!me.muted,
           archived: !!me.archived,
