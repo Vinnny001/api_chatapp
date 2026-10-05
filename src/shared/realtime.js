@@ -30,4 +30,6 @@ export const EVENTS = {
   CALL_ENDED: 'call:ended',
   CALL_SIGNAL: 'call:signal',
   CALL_HANDLED_ELSEWHERE: 'call:handled-elsewhere',
+  // A group call started, someone joined, or it ended: { conversationId, groupCall | null }
+  GROUP_CALL: 'groupcall:update',
 };

@@ -37,6 +37,9 @@ const messageSchema = new mongoose.Schema(
         kind: { type: String, enum: ['audio', 'video'] },
         status: { type: String, enum: ['missed', 'declined', 'answered', 'busy'] },
         duration: { type: Number, default: 0 }, // seconds, answered calls only
+        // Group calls: who took part (everyone else in the group missed it).
+        group: { type: Boolean, default: undefined },
+        participants: { type: [ObjectId], default: undefined },
       },
       default: undefined,
     },

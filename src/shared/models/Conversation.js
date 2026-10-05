@@ -34,6 +34,19 @@ const conversationSchema = new mongoose.Schema(
     disappearingSeconds: { type: Number, default: 0 },
     lastMessage: { type: ObjectId, ref: 'Message', default: null },
     lastMessageAt: { type: Date, default: Date.now },
+    // A group call in progress (LiveKit room). Null when there's none.
+    groupCall: {
+      type: {
+        _id: false,
+        id: String,
+        room: String,
+        kind: { type: String, enum: ['audio', 'video'] },
+        startedBy: { type: ObjectId, ref: 'User' },
+        startedAt: Date,
+        joined: [{ type: ObjectId, ref: 'User' }], // everyone who joined at some point
+      },
+      default: null,
+    },
     // The latest reaction, shown in the chat list ("Ann reacted 👍 to: …") until a newer message.
     lastReaction: {
       type: {

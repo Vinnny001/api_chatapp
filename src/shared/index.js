@@ -13,6 +13,7 @@ export * from './people.js';
 export {
   initPush,
   pushCallEnded,
+  pushGroupCall,
   pushIncomingCall,
   pushNewMessage,
   pushReaction,

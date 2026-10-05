@@ -70,7 +70,14 @@ export function serializeMessage(m, viewerId) {
     media: deleted || !m.media?.url ? null : { ...(m.media.toObject?.() ?? m.media) },
     replyTo: replyPreview(m.replyTo),
     forwarded: !!m.forwarded,
-    call: m.call?.kind ? { kind: m.call.kind, status: m.call.status, duration: m.call.duration || 0 } : null,
+    call: m.call?.kind
+      ? {
+          kind: m.call.kind,
+          status: m.call.status,
+          duration: m.call.duration || 0,
+          ...(m.call.group && { group: true, participants: (m.call.participants || []).map(idOf) }),
+        }
+      : null,
     reactions: (m.reactions || []).map((r) => ({ user: idOf(r.user), emoji: r.emoji })),
     deletedForEveryone: deleted,
     editedAt: m.editedAt ?? null,
@@ -91,6 +98,12 @@ export function messagePreview(message) {
   if (message.type === 'call') return message.call?.kind === 'video' ? '📹 Video call' : '📞 Voice call';
   const label = MEDIA_LABELS[message.type] || 'Message';
   return message.text ? `${label}: ${message.text}` : label;
+}
+
+/** A group call in progress (the LiveKit room name stays on the server). */
+export function serializeGroupCall(g) {
+  if (!g?.id) return null;
+  return { id: g.id, kind: g.kind, startedBy: idOf(g.startedBy), startedAt: g.startedAt, joined: (g.joined || []).map(idOf) };
 }
 
 export function serializeReaction(r) {
@@ -116,6 +129,7 @@ export function serializeConversation(c, viewerId) {
     onlyAdminsCanSend: !!c.onlyAdminsCanSend,
     disappearingSeconds: c.disappearingSeconds || 0,
     lastReaction: serializeReaction(c.lastReaction),
+    groupCall: serializeGroupCall(c.groupCall),
     participants: c.participants.map((p) => ({
       ...publicUser(p.user, { hideLastSeen: viewerHidesLastSeen && !sameId(p.user, viewerId) }),
       role: p.role,

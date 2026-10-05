@@ -148,6 +148,27 @@ export const pushIncomingCall = safely(async (calleeId, { callId, conversationId
   );
 });
 
+/** A group call started: ring every other member (they join, or it stops after a while). */
+export const pushGroupCall = safely(async (memberIds, { callId, conversation, kind, starter }) => {
+  await pushData(
+    memberIds,
+    {
+      type: 'call',
+      group: '1',
+      callId,
+      conversationId: idOf(conversation),
+      kind,
+      // The phone shows the group: "Team" with "@ann is calling the group".
+      callerId: idOf(starter),
+      callerName: conversation.name || 'Group',
+      callerAvatar: conversation.avatarUrl,
+      starterName: userLabel(starter),
+      sentAt: Date.now(),
+    },
+    { ttlSeconds: 40 }
+  );
+});
+
 /** The call stopped ringing (answered, declined, cancelled, timed out): stop the ringer. */
 export const pushCallEnded = safely(async (calleeId, { callId, conversationId, kind, status, caller }) => {
   await pushData([calleeId], {
@@ -156,6 +177,7 @@ export const pushCallEnded = safely(async (calleeId, { callId, conversationId, k
     conversationId,
     kind,
     status, // 'missed' shows a "Missed call" notification
+    group: caller.group ? '1' : '0',
     callerId: caller.id,
     callerName: caller.name || 'Someone',
     callerAvatar: caller.avatarUrl,

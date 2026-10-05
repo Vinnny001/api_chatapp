@@ -39,6 +39,12 @@ export const config = {
     apiSecret: process.env.CLOUDINARY_API_SECRET,
     folder: process.env.CLOUDINARY_FOLDER || 'chatapp',
   },
+  // Group calls (LiveKit Cloud or a self-hosted LiveKit server). Off when not set.
+  livekit: {
+    url: process.env.LIVEKIT_URL,
+    apiKey: process.env.LIVEKIT_API_KEY,
+    apiSecret: process.env.LIVEKIT_API_SECRET,
+  },
 };
 
 export function corsOriginOption() {

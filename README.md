@@ -60,6 +60,7 @@ This reads the old MySQL users (`DB_*`) and the old MongoDB messages (`LEGACY_MO
 ## Usernames and privacy
 
 - Last seen is reciprocal: a user with `showLastSeen: false` gets `lastSeen: null` for everyone else (conversations, profiles, search, contacts, presence).
+- Group calls (LiveKit): set `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` (LiveKit Cloud → project → API keys). `POST /api/conversations/:id/group-call {kind}` starts or joins the group's call and returns `{ url, token }` for the app; `POST /api/conversations/:id/group-call/leave` ends it when the last person leaves. Members are rung by push; the call is logged in the chat; calls everyone dropped out of are ended by a sweeper every minute.
 - Shared content: `GET /api/conversations/shared?kind=all|media|docs|links|apps|starred&q=&before=&conversationId=&counts=1` lists media, documents, links, APKs and starred messages, for one chat or all chats, newest first.
 - Reactions: `POST /api/messages/:id/react {emoji|null}` (also over the realtime socket). The author gets a `reaction` push (and `reaction_removed`); conversations carry `lastReaction` for the chat list.
 - Uploads up to `MAX_UPLOAD_MB` (default 50). Non-media files over Cloudinary's 10 MB limit, and APKs (which Cloudinary refuses), are stored on Cloudinary in parts and served as one download from `GET /files/:id/:name`.
