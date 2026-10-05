@@ -15,7 +15,7 @@ export const sameId = (a, b) => a != null && b != null && idOf(a) === idOf(b);
  * is shared only by people without a username or who chose to show it; the email only when
  * the user chose to. People who already have the number (address book) get it on their device.
  */
-export function publicUser(u, { self = false } = {}) {
+export function publicUser(u, { self = false, hideLastSeen = false } = {}) {
   if (!u) return null;
   if (isObjectId(u)) return { id: idOf(u) };
   const showLastSeen = u.settings?.showLastSeen !== false;
@@ -26,7 +26,8 @@ export function publicUser(u, { self = false } = {}) {
     username: u.username || null,
     avatarUrl: u.avatarUrl ?? null,
     about: u.about ?? '',
-    lastSeen: showLastSeen || self ? u.lastSeen ?? null : null,
+    // Like WhatsApp, it goes both ways: hiding your last seen also hides everyone else's from you.
+    lastSeen: self || (showLastSeen && !hideLastSeen) ? u.lastSeen ?? null : null,
   };
   if (self || !u.username || showPhone) out.phone = u.phone;
   if (self || showEmail) out.email = u.email;
@@ -99,6 +100,7 @@ export function serializeReaction(r) {
 
 export function serializeConversation(c, viewerId) {
   const me = c.participants.find((p) => sameId(p.user, viewerId));
+  const viewerHidesLastSeen = me?.user?.settings?.showLastSeen === false;
   const last = c.lastMessage && !isObjectId(c.lastMessage) ? c.lastMessage : null;
   const since = me ? Math.max(+me.joinedAt || 0, +me.clearedAt || 0) : 0;
   const lastVisible =
@@ -115,7 +117,7 @@ export function serializeConversation(c, viewerId) {
     disappearingSeconds: c.disappearingSeconds || 0,
     lastReaction: serializeReaction(c.lastReaction),
     participants: c.participants.map((p) => ({
-      ...publicUser(p.user),
+      ...publicUser(p.user, { hideLastSeen: viewerHidesLastSeen && !sameId(p.user, viewerId) }),
       role: p.role,
       joinedAt: p.joinedAt,
       lastDeliveredAt: p.lastDeliveredAt,

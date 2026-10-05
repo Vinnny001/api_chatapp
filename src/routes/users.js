@@ -25,6 +25,12 @@ const updateSchema = z.object({
 
 const router = Router();
 
+/** Hiding your own last seen also hides other people's from you (as on WhatsApp). */
+async function hidesLastSeen(userId) {
+  const me = await User.findById(userId, 'settings').lean();
+  return me?.settings?.showLastSeen === false;
+}
+
 /**
  * Find people by username ("ali" or "@ali" finds @alice), by their full phone number, or by
  * email when they chose to share it. Registered names aren't searchable (they're private),
@@ -45,9 +51,10 @@ router.get(
     if (!or.length) return res.json({ users: [] });
 
     const users = await User.find({ _id: { $ne: req.userId }, $or: or }).sort({ username: 1 }).limit(20);
+    const hideLastSeen = await hidesLastSeen(req.userId);
     // Someone who typed the full number already knows it.
     res.json({
-      users: users.map((u) => ({ ...publicUser(u), ...(phones.includes(u.phone) && { phone: u.phone }) })),
+      users: users.map((u) => ({ ...publicUser(u, { hideLastSeen }), ...(phones.includes(u.phone) && { phone: u.phone }) })),
     });
   })
 );
@@ -72,10 +79,11 @@ router.post(
     if (!inputsByVariant.size) return res.json({ matches: [] });
 
     const users = await User.find({ phone: { $in: [...inputsByVariant.keys()] } });
+    const hideLastSeen = await hidesLastSeen(req.userId);
     const matches = [];
     for (const u of users) {
       for (const input of new Set(inputsByVariant.get(u.phone))) {
-        matches.push({ phone: input, self: String(u._id) === req.userId, user: publicUser(u) });
+        matches.push({ phone: input, self: String(u._id) === req.userId, user: publicUser(u, { hideLastSeen }) });
       }
     }
     res.json({ matches });
@@ -132,7 +140,9 @@ router.patch(
     await user.save();
 
     const convIds = await Conversation.find({ 'participants.user': user._id }).distinct('_id');
-    emitToConversations(convIds.map(String), EVENTS.USER_UPDATED, publicUser(user));
+    // Profile changes only: last seen travels by presence events (which respect each viewer).
+    const { lastSeen, ...profile } = publicUser(user);
+    emitToConversations(convIds.map(String), EVENTS.USER_UPDATED, profile);
     res.json({ user: publicUser(user, { self: true }) });
   })
 );
@@ -140,7 +150,7 @@ router.patch(
 const objectId = z.string().refine((v) => mongoose.isValidObjectId(v), 'Invalid id');
 const contactSchema = z.object({ name: z.string().trim().max(60).default('') });
 
-const contactOut = (c) => ({ user: publicUser(c.user), name: c.name || '', addedAt: c.addedAt });
+const contactOut = (c, hideLastSeen = false) => ({ user: publicUser(c.user, { hideLastSeen }), name: c.name || '', addedAt: c.addedAt });
 
 /** My saved ChatApp contacts (kept on the server so they're the same on every device). */
 router.get(
@@ -148,7 +158,8 @@ router.get(
   handle(async (req, res) => {
     const me = await User.findById(req.userId, '+contacts').populate('contacts.user', USER_FIELDS);
     const contacts = (me?.contacts || []).filter((c) => c.user); // skip deleted accounts
-    res.json({ contacts: contacts.map(contactOut) });
+    const hideLastSeen = me?.settings?.showLastSeen === false;
+    res.json({ contacts: contacts.map((c) => contactOut(c, hideLastSeen)) });
   })
 );
 
@@ -171,7 +182,7 @@ router.put(
         { $push: { contacts: { $each: [{ user: userId, name, addedAt: new Date() }], $slice: -5000 } } }
       );
     }
-    res.json({ contact: contactOut({ user: other, name, addedAt: new Date() }) });
+    res.json({ contact: contactOut({ user: other, name, addedAt: new Date() }, await hidesLastSeen(req.userId)) });
   })
 );
 
@@ -189,7 +200,8 @@ router.get(
   handle(async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) throw new HttpError(404, 'User not found');
-    res.json({ user: publicUser(user, { self: String(user._id) === req.userId }) });
+    const self = String(user._id) === req.userId;
+    res.json({ user: publicUser(user, { self, hideLastSeen: !self && (await hidesLastSeen(req.userId)) }) });
   })
 );
 
