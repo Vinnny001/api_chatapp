@@ -2,7 +2,7 @@
 // the same MongoDB collections, so keep src/shared/models and serialize.js identical in both.
 export { config, corsOriginOption } from './config.js';
 export { connectMongo } from './db.js';
-export { signToken, verifyToken } from './auth.js';
+export { signToken, verifyAnyToken, verifyToken } from './auth.js';
 export { rooms, EVENTS, UPLOAD_URL_PATTERN, INTERNAL_EVENTS_PATH } from './realtime.js';
 export { User } from './models/User.js';
 export { Conversation } from './models/Conversation.js';

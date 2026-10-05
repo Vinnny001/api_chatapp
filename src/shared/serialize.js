@@ -33,6 +33,7 @@ export function publicUser(u, { self = false, hideLastSeen = false } = {}) {
   if (self || showEmail) out.email = u.email;
   if (self) {
     out.name = u.name;
+    out.emailVerified = u.emailVerified !== false;
     out.gender = u.gender;
     out.settings = { showLastSeen, showPhone, showEmail };
   }

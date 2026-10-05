@@ -12,6 +12,19 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, required: true, unique: true, trim: true },
     gender: { type: String, enum: ['Male', 'Female', 'Other'] },
     passwordHash: { type: String, required: true, select: false },
+    // false until the email code is entered. Missing on accounts from before email
+    // confirmation existed: those count as confirmed.
+    emailVerified: { type: Boolean, default: undefined },
+    // The current one-time code (confirm email / reset password), hashed.
+    emailCode: {
+      type: { _id: false, hash: String, purpose: String, expiresAt: Date, attempts: Number, sentAt: Date },
+      default: undefined,
+      select: false,
+    },
+    // Switched off by an admin: can't sign in or use the app.
+    disabled: { type: Boolean, default: undefined },
+    // People this user blocked (they can't message, call or see them).
+    blocked: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], default: undefined },
     avatarUrl: { type: String, default: null },
     about: { type: String, default: 'Hey there! I am using ChatApp.', maxlength: 140 },
     lastSeen: { type: Date, default: null },

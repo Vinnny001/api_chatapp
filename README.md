@@ -57,6 +57,12 @@ npm run migrate:mysql
 
 This reads the old MySQL users (`DB_*`) and the old MongoDB messages (`LEGACY_MONGO_URI`, or `MONGO_URI` if that's not set), then writes them into `MONGO_URI`. Old passwords keep working, and it's safe to run more than once.
 
+## Email confirmation and password reset
+
+New accounts confirm their email with a 6-digit code before they can use the app: sign-up and sign-in return a *pending* token (`verificationRequired: true`) that only works for `POST /api/auth/verify-email {code}` and `POST /api/auth/resend-code` (once a minute); confirming returns a normal token. `POST /api/auth/forgot {email}` emails a reset code (same answer whether or not the email has an account) and `POST /api/auth/reset {email, code, password}` sets a new password and signs in. Codes expire after 15 minutes and allow 5 tries. Accounts created before this feature count as confirmed.
+
+Emails go through Brevo's HTTP API (Render's free plan blocks SMTP): set `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` (confirmed in Brevo → Senders) and optionally `BREVO_SENDER_NAME`. Without a key, emails are printed to the server log (development).
+
 ## Usernames and privacy
 
 - Last seen is reciprocal: a user with `showLastSeen: false` gets `lastSeen: null` for everyone else (conversations, profiles, search, contacts, presence).
