@@ -49,8 +49,15 @@ export function emitToUser(userId, event, payload) {
   push({ op: 'emit', rooms: [rooms.user(userId)], event, data: payload });
 }
 
-export function emitToConversations(conversationIds, event, payload) {
-  if (conversationIds.length) push({ op: 'emit', rooms: conversationIds.map(rooms.conv), event, data: payload });
+export function emitToConversations(conversationIds, event, payload, { exceptUsers = [] } = {}) {
+  if (!conversationIds.length) return;
+  const except = exceptUsers.map((id) => rooms.user(idOf(id)));
+  push({ op: 'emit', rooms: conversationIds.map(rooms.conv), ...(except.length && { except }), event, data: payload });
+}
+
+/** Signs a user out everywhere right now (account disabled by an admin). */
+export function disconnectUser(userId) {
+  push({ op: 'disconnect', rooms: [rooms.user(idOf(userId))] });
 }
 
 /** Sends every member their own view of the conversation, subscribing new members' sockets first. */

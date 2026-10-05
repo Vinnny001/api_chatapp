@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
-import { Conversation, EVENTS, UPLOAD_URL_PATTERN, USER_FIELDS, User, escapeRegex, publicUser } from '#shared';
+import { Conversation, EVENTS, Message, UPLOAD_URL_PATTERN, USER_FIELDS, User, escapeRegex, publicUser } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
-import { emitToConversations } from '../realtime.js';
+import { broadcastConversation, emitToConversations } from '../realtime.js';
+import { Report } from '../models/Report.js';
 import { phoneVariants } from '../phone.js';
 import { usernameSchema } from './auth.js';
 
@@ -141,8 +142,9 @@ router.patch(
 
     const convIds = await Conversation.find({ 'participants.user': user._id }).distinct('_id');
     // Profile changes only: last seen travels by presence events (which respect each viewer).
+    // People I blocked don't get my new photo or about.
     const { lastSeen, ...profile } = publicUser(user);
-    emitToConversations(convIds.map(String), EVENTS.USER_UPDATED, profile);
+    emitToConversations(convIds.map(String), EVENTS.USER_UPDATED, profile, { exceptUsers: user.blocked || [] });
     res.json({ user: publicUser(user, { self: true }) });
   })
 );
@@ -192,6 +194,79 @@ router.delete(
     const userId = objectId.parse(req.params.userId);
     await User.updateOne({ _id: req.userId }, { $pull: { contacts: { user: userId } } });
     res.json({ ok: true });
+  })
+);
+
+// ---- Block and report
+
+/** The people I blocked (Settings → Privacy → Blocked). */
+router.get(
+  '/me/blocked',
+  handle(async (req, res) => {
+    const me = await User.findById(req.userId, 'blocked').populate('blocked', USER_FIELDS);
+    res.json({ users: (me?.blocked || []).filter(Boolean).map((u) => publicUser(u)) });
+  })
+);
+
+/** My one-to-one chat with them, refreshed on my devices (its blocked flag changed). */
+async function refreshDirectChat(meId, otherId) {
+  const directKey = [String(meId), String(otherId)].sort().join(':');
+  const conv = await Conversation.findOne({ directKey }, '_id');
+  if (conv) await broadcastConversation(conv._id);
+}
+
+async function setBlocked(meId, otherId, blocked) {
+  if (String(meId) === String(otherId)) throw new HttpError(400, 'You can not block yourself');
+  if (!(await User.exists({ _id: otherId }))) throw new HttpError(404, 'User not found');
+  await User.updateOne({ _id: meId }, blocked ? { $addToSet: { blocked: otherId } } : { $pull: { blocked: otherId } });
+  await refreshDirectChat(meId, otherId);
+}
+
+router.post(
+  '/:id/block',
+  handle(async (req, res) => {
+    await setBlocked(req.userId, objectId.parse(req.params.id), true);
+    res.json({ blocked: true });
+  })
+);
+
+router.delete(
+  '/:id/block',
+  handle(async (req, res) => {
+    await setBlocked(req.userId, objectId.parse(req.params.id), false);
+    res.json({ blocked: false });
+  })
+);
+
+const REPORT_REASONS = ['spam', 'harassment', 'scam', 'inappropriate', 'impersonation', 'other'];
+
+/**
+ * Report someone (optionally blocking them too). Like WhatsApp, the report includes their
+ * last 5 messages in the chat it was made from, so it can be reviewed.
+ */
+router.post(
+  '/:id/report',
+  handle(async (req, res) => {
+    const reportedId = objectId.parse(req.params.id);
+    const { reason, details, conversationId, block } = z
+      .object({
+        reason: z.enum(REPORT_REASONS).default('other'),
+        details: z.string().trim().max(500).optional(),
+        conversationId: objectId.optional(),
+        block: z.boolean().default(false),
+      })
+      .parse(req.body || {});
+    if (reportedId === req.userId) throw new HttpError(400, 'You can not report yourself');
+    if (!(await User.exists({ _id: reportedId }))) throw new HttpError(404, 'User not found');
+    let messages = [];
+    if (conversationId && (await Conversation.exists({ _id: conversationId, 'participants.user': { $all: [req.userId, reportedId] } }))) {
+      messages = (await Message.find({ conversation: conversationId, sender: reportedId }).sort({ createdAt: -1 }).limit(5).lean())
+        .reverse()
+        .map((m) => ({ type: m.type, text: m.text || '', mediaUrl: m.media?.url || null, at: m.createdAt }));
+    }
+    await Report.create({ reporter: req.userId, reported: reportedId, reason, details, conversation: conversationId, messages });
+    if (block) await setBlocked(req.userId, reportedId, true);
+    res.status(201).json({ ok: true, blocked: block });
   })
 );
 

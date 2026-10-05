@@ -8,6 +8,7 @@ import {
   Message,
   REPLY_POPULATE,
   User,
+  blockStatus,
   canSend,
   createMessage,
   createSystemMessage,
@@ -540,6 +541,8 @@ router.post(
 
     const replyTo =
       data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conv._id })) ? data.replyTo : null;
+    const block = await blockStatus(conv, req.userId);
+    if (block.iBlocked) throw new HttpError(403, 'You blocked this contact. Unblock them to send a message.');
     const { message, duplicate } = await createMessage({
       conversation: conv,
       senderId: req.userId,
@@ -549,8 +552,11 @@ router.post(
       replyTo,
       forwarded: data.forwarded,
       clientId: data.clientId,
+      hiddenFrom: block.blockedMe ? [block.peerId] : [], // they blocked me: never reaches them
     });
-    if (!duplicate) {
+    if (!duplicate && block.blockedMe) {
+      emitToUser(req.userId, EVENTS.MESSAGE_NEW, serializeMessage(message));
+    } else if (!duplicate) {
       broadcastMessage(message, conv);
       pushNewMessage(message, conv);
     }

@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 // Shapes sent to clients. Both services use these so REST and socket payloads match exactly.
 
-export const USER_FIELDS = 'username phone email avatarUrl about lastSeen settings';
+export const USER_FIELDS = 'username phone email avatarUrl about lastSeen settings blocked';
 export const REPLY_POPULATE = { path: 'replyTo', select: 'sender type text media deletedForEveryone' };
 
 export const isObjectId = (v) => v instanceof mongoose.Types.ObjectId;
@@ -133,6 +133,8 @@ export function serializeConversation(c, viewerId) {
     groupCall: serializeGroupCall(c.groupCall),
     participants: c.participants.map((p) => ({
       ...publicUser(p.user, { hideLastSeen: viewerHidesLastSeen && !sameId(p.user, viewerId) }),
+      // Someone who blocked me: no photo, about or last seen for me (as on WhatsApp).
+      ...((p.user?.blocked || []).some((id) => sameId(id, viewerId)) && { avatarUrl: null, about: '', lastSeen: null }),
       role: p.role,
       joinedAt: p.joinedAt,
       lastDeliveredAt: p.lastDeliveredAt,
@@ -143,6 +145,10 @@ export function serializeConversation(c, viewerId) {
     createdAt: c.createdAt,
     me: me
       ? {
+          // One-to-one chat with someone I blocked.
+          blocked:
+            c.type === 'direct' &&
+            c.participants.some((p) => !sameId(p.user, viewerId) && (me.user?.blocked || []).some((id) => sameId(id, p.user))),
           role: me.role,
           pinned: !!me.pinned,
           muted: !!me.muted,

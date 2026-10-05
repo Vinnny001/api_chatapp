@@ -1,5 +1,6 @@
 import { Conversation } from './models/Conversation.js';
 import { Message } from './models/Message.js';
+import { User } from './models/User.js';
 import { REPLY_POPULATE, USER_FIELDS, idOf, messagePreview, sameId, serializeReaction } from './serialize.js';
 
 /** Query helper: a conversation with everything serializeConversation needs. */
@@ -34,6 +35,7 @@ export async function createMessage({
   clientId,
   call,
   countsAsUnread = true, // false for call log entries the recipient already saw (answered/declined)
+  hiddenFrom = [], // people who must never see it (they blocked the sender)
 }) {
   const expiresAt =
     conversation.disappearingSeconds > 0
@@ -53,6 +55,7 @@ export async function createMessage({
       forwarded,
       call,
       expiresAt,
+      ...(hiddenFrom.length && { deletedFor: hiddenFrom }),
     });
   } catch (err) {
     if (err.code === 11000 && clientId) {
@@ -60,6 +63,12 @@ export async function createMessage({
       if (existing) return { message: existing, duplicate: true };
     }
     throw err;
+  }
+
+  // A message the other person never sees (blocked) doesn't move the chat or count as unread.
+  if (hiddenFrom.length) {
+    if (replyTo) await message.populate(REPLY_POPULATE);
+    return { message, duplicate: false };
   }
 
   const set = { lastMessage: message._id, lastMessageAt: message.createdAt, lastReaction: null };
@@ -117,6 +126,29 @@ export async function reactToMessage({ messageId, userId, emoji }) {
     if (cleared.modifiedCount) patch.lastReaction = null;
   }
   return { message, conversation, patch, added: adding ? emoji : null, removed: !adding && !!previous, preview };
+}
+
+/**
+ * One-to-one chats: has either person blocked the other? (Groups aren't affected, as on WhatsApp.)
+ * { peerId, iBlocked: I blocked them, blockedMe: they blocked me }
+ */
+export async function blockStatus(conversation, userId) {
+  const none = { peerId: null, iBlocked: false, blockedMe: false };
+  if (conversation.type !== 'direct') return none;
+  const peerId = conversation.participants.map((p) => idOf(p.user)).find((id) => id !== String(userId));
+  if (!peerId) return none;
+  const [me, them] = await Promise.all([User.findById(userId, 'blocked').lean(), User.findById(peerId, 'blocked').lean()]);
+  return {
+    peerId,
+    iBlocked: (me?.blocked || []).some((id) => String(id) === peerId),
+    blockedMe: (them?.blocked || []).some((id) => String(id) === String(userId)),
+  };
+}
+
+/** Ids of the people who blocked this user (for hiding their presence from them). */
+export async function blockedBy(userId) {
+  const users = await User.find({ blocked: userId }, '_id').lean();
+  return users.map((u) => String(u._id));
 }
 
 export function createSystemMessage(conversation, text) {

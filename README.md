@@ -63,6 +63,11 @@ New accounts confirm their email with a 6-digit code before they can use the app
 
 Emails go through Brevo's HTTP API (Render's free plan blocks SMTP): set `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` (confirmed in Brevo → Senders) and optionally `BREVO_SENDER_NAME`. Without a key, emails are printed to the server log (development).
 
+## Block and report
+
+- `POST|DELETE /api/users/:id/block`, `GET /api/users/me/blocked`. Like WhatsApp, the blocked person isn't told: their messages in the one-to-one chat stay one tick and are never delivered (stored hidden from the blocker), their calls never ring, and they stop seeing the blocker's photo, about, online status and last seen. The blocker can't message or call them until unblocking. Groups aren't affected.
+- `POST /api/users/:id/report {reason, details, conversationId, block}` stores a report with the person's last 5 messages in that chat, for the admin page.
+
 ## Usernames and privacy
 
 - Last seen is reciprocal: a user with `showLastSeen: false` gets `lastSeen: null` for everyone else (conversations, profiles, search, contacts, presence).
