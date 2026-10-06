@@ -68,6 +68,11 @@ Emails go through Brevo's HTTP API (Render's free plan blocks SMTP): set `BREVO_
 - Mentions are written in the text as `@[label](userId)` (label = @username or number, never a private name). For group messages the server keeps the members mentioned in `message.mentions`, counts them per member as `me.unreadMentions` (reset when read or cleared) and pushes to them even if they muted the chat. Previews and push text show `@label`. Editing a message doesn't change who was mentioned.
 - `POST|DELETE /api/messages/:id/pin`: up to 3 pins per chat (a 4th replaces the oldest), by anyone who can send there; pinning adds a "… pinned a message" note. Conversations carry `pinned: [{messageId, by, at, sender, type, preview}]`.
 
+## Polls and view once
+
+- Polls are messages of type `poll` sent like any other (`poll: {question, options: [text], multiple}`; 2–12 different options). `POST /api/messages/:id/vote {options: [optionId]}` replaces your vote in one atomic update (`[]` takes it back) and broadcasts `message:updated` with the new `poll`.
+- View once: send an image/video with `viewOnce: true`. Its `media` is sent everywhere without a `url` (so it's never cached, pushed or forwarded), and it's left out of the media browser. `POST /api/messages/:id/open` returns the url to each recipient the first time only (410 afterwards; 403 for the sender) and broadcasts `openedBy`. Once every recipient has opened it the url is removed from the database (the file itself stays in storage).
+
 ## Group invite links
 
 - `GET /api/conversations/:id/invite` (group admins) returns the code, creating it on first use; `POST /api/conversations/:id/invite/reset` replaces it. The code is never included in conversation data sent to members.

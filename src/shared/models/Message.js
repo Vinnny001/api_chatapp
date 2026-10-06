@@ -2,14 +2,14 @@ import mongoose from 'mongoose';
 
 const { ObjectId } = mongoose.Schema.Types;
 
-export const MESSAGE_TYPES = ['text', 'image', 'video', 'audio', 'voice', 'file', 'system', 'call'];
+export const MESSAGE_TYPES = ['text', 'image', 'video', 'audio', 'voice', 'file', 'system', 'call', 'poll'];
 
 // Same as WhatsApp: long messages are fine; the app collapses them behind "Read more".
 export const MAX_TEXT_LENGTH = 65536;
 
 const mediaSchema = new mongoose.Schema(
   {
-    url: { type: String, required: true },
+    url: { type: String }, // removed from view-once media once everyone has opened it
     name: String,
     size: Number,
     mime: String,
@@ -44,6 +44,20 @@ const messageSchema = new mongoose.Schema(
       default: undefined,
     },
     forwarded: { type: Boolean, default: false },
+    // View once (photos/videos): the url is only handed out by POST /messages/:id/open,
+    // once per recipient; openedBy lists who has opened it.
+    viewOnce: { type: Boolean, default: undefined },
+    openedBy: { type: [{ type: ObjectId, ref: 'User' }], default: undefined },
+    poll: {
+      type: {
+        _id: false,
+        question: { type: String, maxlength: 300 },
+        options: [{ _id: false, id: String, text: { type: String, maxlength: 100 } }],
+        multiple: { type: Boolean, default: false },
+        votes: [{ _id: false, user: { type: ObjectId, ref: 'User' }, option: String }],
+      },
+      default: undefined,
+    },
     reactions: [{ _id: false, user: { type: ObjectId, ref: 'User' }, emoji: String }],
     starredBy: [{ type: ObjectId, ref: 'User' }],
     // People @mentioned in a group message (text holds "@[label](userId)" tokens).

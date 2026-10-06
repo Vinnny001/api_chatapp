@@ -114,7 +114,7 @@ const LINK = /(https?:\/\/|www\.)\S+/i;
 
 /** What each tab shows. */
 function kindFilter(kind, userId) {
-  const media = { type: { $in: ['image', 'video'] } };
+  const media = { type: { $in: ['image', 'video'] }, viewOnce: { $ne: true } };
   const docs = { type: 'file', ...NOT_APK };
   const apps = { type: 'file', ...APK };
   const links = { text: LINK };
@@ -539,7 +539,7 @@ router.get(
 const sendSchema = z
   .object({
     clientId: z.string().min(8).max(64),
-    type: z.enum(['text', 'image', 'video', 'audio', 'voice', 'file']).default('text'),
+    type: z.enum(['text', 'image', 'video', 'audio', 'voice', 'file', 'poll']).default('text'),
     text: z.string().max(MAX_TEXT_LENGTH).default(''),
     media: z
       .object({
@@ -552,8 +552,18 @@ const sendSchema = z
       .optional(),
     replyTo: objectId.nullish(),
     forwarded: z.boolean().optional(),
+    viewOnce: z.boolean().optional(),
+    poll: z
+      .object({
+        question: z.string().trim().min(1, 'Ask a question').max(300),
+        options: z.array(z.string().trim().min(1).max(100)).min(2, 'Add at least 2 options').max(12),
+        multiple: z.boolean().optional(),
+      })
+      .refine((p) => new Set(p.options.map((o) => o.toLowerCase())).size === p.options.length, 'Options must be different')
+      .optional(),
   })
-  .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 : !!d.media), 'Message is empty');
+  .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 : d.type === 'poll' ? !!d.poll : !!d.media), 'Message is empty')
+  .refine((d) => !d.viewOnce || d.type === 'image' || d.type === 'video', 'Only photos and videos can be view once');
 
 /**
  * Send over plain HTTP. The app normally sends through the realtime socket; this is used
@@ -579,6 +589,8 @@ router.post(
       media: data.media,
       replyTo,
       forwarded: data.forwarded,
+      viewOnce: data.viewOnce,
+      poll: data.poll,
       clientId: data.clientId,
       hiddenFrom: block.blockedMe ? [block.peerId] : [], // they blocked me: never reaches them
     });
@@ -620,6 +632,7 @@ router.get(
     const docs = await Message.find({
       conversation: conv._id,
       type: { $in: ['image', 'video', 'file', 'audio'] },
+      viewOnce: { $ne: true },
       deletedForEveryone: false,
       deletedFor: { $ne: req.userId },
     })

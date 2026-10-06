@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { z } from 'zod';
 import {
   EVENTS,
@@ -14,6 +15,7 @@ import {
   reactToMessage,
   sameId,
   serializeMessage,
+  serializePoll,
 } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
 import { broadcastConversation, broadcastMessage, emitToConversations, emitToUser } from '../realtime.js';
@@ -46,6 +48,65 @@ router.post(
     const payload = { id: String(message._id), conversationId: String(message.conversation), starred: !starred };
     emitToUser(req.userId, EVENTS.MESSAGE_UPDATED, payload); // keep the user's other devices in sync
     res.json(payload);
+  })
+);
+
+/**
+ * View once: hands the media url to a recipient the first time they open it, never again.
+ * Once every recipient has opened it the url is forgotten.
+ */
+router.post(
+  '/:id/open',
+  handle(async (req, res) => {
+    const message = await Message.findById(req.params.id);
+    const conv = message && (await findConversationForUser(message.conversation, req.userId));
+    if (!conv || !message.viewOnce) throw new HttpError(404, 'Message not found');
+    if (sameId(message.sender, req.userId)) throw new HttpError(403, 'You can’t open a view once message you sent');
+    const url = message.media?.url;
+    // Atomic: two taps (or two phones) can't both get it.
+    const opened = await Message.updateOne(
+      { _id: message._id, openedBy: { $ne: req.userId }, 'media.url': { $exists: true } },
+      { $addToSet: { openedBy: req.userId } }
+    );
+    if (!url || !opened.modifiedCount) throw new HttpError(410, 'You already opened this');
+    const fresh = await Message.findById(message._id, 'openedBy sender');
+    const openedBy = fresh.openedBy.map(String);
+    const everyone = conv.participants.filter((p) => !sameId(p.user, message.sender)).every((p) => openedBy.includes(String(p.user)));
+    if (everyone) await Message.updateOne({ _id: message._id }, { $unset: { 'media.url': 1 } });
+    emitToConversations([conv._id], EVENTS.MESSAGE_UPDATED, { id: String(message._id), conversationId: String(conv._id), openedBy });
+    res.json({ url, type: message.type, mime: message.media.mime });
+  })
+);
+
+/** Vote in a poll: options replaces my vote ([] takes it back). */
+router.post(
+  '/:id/vote',
+  handle(async (req, res) => {
+    const { options } = z.object({ options: z.array(z.string().max(4)).max(12) }).parse(req.body);
+    const message = await Message.findById(req.params.id);
+    const conv = message && (await findConversationForUser(message.conversation, req.userId));
+    if (!conv || message.type !== 'poll' || message.deletedForEveryone) throw new HttpError(404, 'Poll not found');
+    const valid = new Set(message.poll.options.map((o) => o.id));
+    const picked = [...new Set(options)].filter((o) => valid.has(o));
+    if (!message.poll.multiple && picked.length > 1) throw new HttpError(400, 'Pick one option');
+    // One atomic update (my old votes out, new ones in), so quick taps can't interleave.
+    const me = new mongoose.Types.ObjectId(req.userId);
+    await Message.updateOne({ _id: message._id }, [
+      {
+        $set: {
+          'poll.votes': {
+            $concatArrays: [
+              { $filter: { input: '$poll.votes', cond: { $ne: ['$$this.user', me] } } },
+              picked.map((option) => ({ user: me, option })),
+            ],
+          },
+        },
+      },
+    ]);
+    const fresh = await Message.findById(message._id, 'poll');
+    const poll = serializePoll(fresh.poll);
+    emitToConversations([conv._id], EVENTS.MESSAGE_UPDATED, { id: String(message._id), conversationId: String(conv._id), poll });
+    res.json({ poll });
   })
 );
 

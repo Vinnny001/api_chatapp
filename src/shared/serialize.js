@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 // Shapes sent to clients. Both services use these so REST and socket payloads match exactly.
 
 export const USER_FIELDS = 'username phone email avatarUrl about lastSeen settings blocked';
-export const REPLY_POPULATE = { path: 'replyTo', select: 'sender type text media deletedForEveryone' };
+export const REPLY_POPULATE = { path: 'replyTo', select: 'sender type text media deletedForEveryone viewOnce poll.question' };
 
 export const isObjectId = (v) => v instanceof mongoose.Types.ObjectId;
 export const idOf = (v) => (v == null ? null : String(v._id ?? v));
@@ -47,10 +47,27 @@ function replyPreview(r) {
     id: idOf(r),
     sender: idOf(r.sender),
     type: r.type,
-    text: r.deletedForEveryone ? '' : (r.text || '').slice(0, 200),
+    text: r.deletedForEveryone ? '' : r.type === 'poll' ? `📊 ${r.poll?.question || 'Poll'}` : (r.text || '').slice(0, 200),
     mediaName: r.deletedForEveryone ? undefined : r.media?.name,
-    mediaUrl: !r.deletedForEveryone && r.type === 'image' ? r.media?.url : undefined,
+    mediaUrl: !r.deletedForEveryone && !r.viewOnce && r.type === 'image' ? r.media?.url : undefined,
+    ...(r.viewOnce && { viewOnce: true }),
     deletedForEveryone: !!r.deletedForEveryone,
+  };
+}
+
+/** Media details; view-once media never carries its url (it's fetched once, on opening). */
+function serializeMedia(m) {
+  const media = { ...(m.media.toObject?.() ?? m.media) };
+  if (m.viewOnce) delete media.url;
+  return media;
+}
+
+export function serializePoll(p) {
+  return {
+    question: p.question,
+    options: (p.options || []).map((o) => ({ id: o.id, text: o.text })),
+    multiple: !!p.multiple,
+    votes: (p.votes || []).map((v) => ({ user: idOf(v.user), option: v.option })),
   };
 }
 
@@ -68,7 +85,7 @@ export function serializeMessage(m, viewerId) {
     clientId: m.clientId ?? null,
     type: m.type,
     text: deleted ? '' : m.text || '',
-    media: deleted || !m.media?.url ? null : { ...(m.media.toObject?.() ?? m.media) },
+    media: deleted || (!m.media?.url && !m.viewOnce) || !m.media ? null : serializeMedia(m),
     replyTo: replyPreview(m.replyTo),
     forwarded: !!m.forwarded,
     call: m.call?.kind
@@ -81,6 +98,8 @@ export function serializeMessage(m, viewerId) {
       : null,
     reactions: (m.reactions || []).map((r) => ({ user: idOf(r.user), emoji: r.emoji })),
     mentions: (m.mentions || []).map(idOf),
+    ...(m.viewOnce && { viewOnce: true, openedBy: (m.openedBy || []).map(idOf) }),
+    ...(m.poll?.question && !deleted && { poll: serializePoll(m.poll) }),
     deletedForEveryone: deleted,
     editedAt: m.editedAt ?? null,
     expiresAt: m.expiresAt ?? null,
@@ -102,6 +121,8 @@ export function messagePreview(message) {
   if (message.type === 'text' || message.type === 'system') return plainMentions(message.text || '');
   if (message.type === 'file') return `📄 ${message.media?.name || 'Document'}`;
   if (message.type === 'call') return message.call?.kind === 'video' ? '📹 Video call' : '📞 Voice call';
+  if (message.type === 'poll') return `📊 ${message.poll?.question || 'Poll'}`;
+  if (message.viewOnce) return message.type === 'video' ? '🎥 Video (view once)' : '📷 Photo (view once)';
   const label = MEDIA_LABELS[message.type] || 'Message';
   return message.text ? `${label}: ${message.text}` : label;
 }

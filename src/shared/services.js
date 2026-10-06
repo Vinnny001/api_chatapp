@@ -9,7 +9,7 @@ export function withConversationRefs(query) {
   return query
     .populate('participants.user', USER_FIELDS)
     .populate({ path: 'lastMessage', populate: REPLY_POPULATE })
-    .populate({ path: 'pinned.message', select: 'sender type text media call deletedForEveryone' });
+    .populate({ path: 'pinned.message', select: 'sender type text media call deletedForEveryone viewOnce poll.question' });
 }
 
 export function findConversationForUser(conversationId, userId) {
@@ -34,6 +34,8 @@ export async function createMessage({
   media,
   replyTo = null,
   forwarded = false,
+  viewOnce = false, // photos/videos only
+  poll, // { question, options: [text], multiple }
   clientId,
   call,
   countsAsUnread = true, // false for call log entries the recipient already saw (answered/declined)
@@ -62,6 +64,16 @@ export async function createMessage({
       replyTo,
       forwarded,
       call,
+      ...(viewOnce && (type === 'image' || type === 'video') && { viewOnce: true, openedBy: [] }),
+      ...(type === 'poll' &&
+        poll && {
+          poll: {
+            question: poll.question.trim(),
+            options: poll.options.map((t, i) => ({ id: String(i), text: t.trim() })),
+            multiple: !!poll.multiple,
+            votes: [],
+          },
+        }),
       expiresAt,
       ...(mentions.length && { mentions }),
       ...(hiddenFrom.length && { deletedFor: hiddenFrom }),
