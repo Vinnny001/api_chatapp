@@ -35,6 +35,8 @@ const conversationSchema = new mongoose.Schema(
     disappearingSeconds: { type: Number, default: 0 },
     lastMessage: { type: ObjectId, ref: 'Message', default: null },
     lastMessageAt: { type: Date, default: Date.now },
+    // Group invite link code (admins share https://<api>/join/<code>); reset = new code.
+    inviteCode: { type: String, index: { unique: true, sparse: true } },
     // Pinned messages (up to 3, newest last), shown in a bar under the chat header.
     pinned: {
       type: [{ _id: false, message: { type: ObjectId, ref: 'Message' }, by: { type: ObjectId, ref: 'User' }, at: Date }],

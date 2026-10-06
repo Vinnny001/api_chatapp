@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -394,6 +395,32 @@ router.post(
     });
     if (unreadCount === 0) pushRead(req.userId, String(conv._id));
     res.json({ unreadCount });
+  })
+);
+
+/** The group's invite link code (admins only); made on first use. */
+router.get(
+  '/:id/invite',
+  handle(async (req, res) => {
+    const conv = await loadForUser(req);
+    requireGroupAdmin(conv, req.userId);
+    if (!conv.inviteCode) {
+      conv.inviteCode = crypto.randomBytes(16).toString('base64url');
+      await conv.save();
+    }
+    res.json({ code: conv.inviteCode });
+  })
+);
+
+/** A new code: the old link stops working at once. */
+router.post(
+  '/:id/invite/reset',
+  handle(async (req, res) => {
+    const conv = await loadForUser(req);
+    requireGroupAdmin(conv, req.userId);
+    conv.inviteCode = crypto.randomBytes(16).toString('base64url');
+    await conv.save();
+    res.json({ code: conv.inviteCode });
   })
 );
 

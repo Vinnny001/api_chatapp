@@ -9,6 +9,7 @@ import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
 import groupCallRoutes from './routes/groupCalls.js';
 import adminRoutes from './routes/admin.js';
+import inviteRoutes, { invitePage } from './routes/invites.js';
 import messageRoutes from './routes/messages.js';
 import uploadRoutes, { serveStoredFile, serveUploads } from './routes/uploads.js';
 
@@ -24,6 +25,7 @@ export function createApp() {
   app.get('/health', (_req, res) => res.json({ ok: true, service: 'api' }));
   app.use('/uploads', serveUploads);
   app.get('/files/:id/:name', serveStoredFile);
+  app.get('/join/:code', invitePage);
   app.use('/api/uploads', uploadRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/users', requireAuth, userRoutes);
@@ -31,6 +33,7 @@ export function createApp() {
   app.use('/api/conversations', requireAuth, conversationRoutes);
   app.use('/api/messages', requireAuth, messageRoutes);
   app.use('/api/admin', requireAuth, adminRoutes);
+  app.use('/api/invites', requireAuth, inviteRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

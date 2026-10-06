@@ -68,6 +68,12 @@ Emails go through Brevo's HTTP API (Render's free plan blocks SMTP): set `BREVO_
 - Mentions are written in the text as `@[label](userId)` (label = @username or number, never a private name). For group messages the server keeps the members mentioned in `message.mentions`, counts them per member as `me.unreadMentions` (reset when read or cleared) and pushes to them even if they muted the chat. Previews and push text show `@label`. Editing a message doesn't change who was mentioned.
 - `POST|DELETE /api/messages/:id/pin`: up to 3 pins per chat (a 4th replaces the oldest), by anyone who can send there; pinning adds a "… pinned a message" note. Conversations carry `pinned: [{messageId, by, at, sender, type, preview}]`.
 
+## Group invite links
+
+- `GET /api/conversations/:id/invite` (group admins) returns the code, creating it on first use; `POST /api/conversations/:id/invite/reset` replaces it. The code is never included in conversation data sent to members.
+- `GET /api/invites/:code` previews the group (name, description, photo, member count, whether you're a member); `POST /api/invites/:code/join` adds you as a member (once, even if tapped twice) with a "… joined using this group's invite link" note.
+- `GET /join/:code` (public, no sign-in) is the page behind a shared link: group name, photo and member count, plus an **Open in ChatApp** button (`intent://join/<code>#Intent;scheme=chatapp;package=com.jujatech.chatapp;end`). It runs no scripts.
+
 ## Block and report
 
 - `POST|DELETE /api/users/:id/block`, `GET /api/users/me/blocked`. Like WhatsApp, the blocked person isn't told: their messages in the one-to-one chat stay one tick and are never delivered (stored hidden from the blocker), their calls never ring, and they stop seeing the blocker's photo, about, online status and last seen. The blocker can't message or call them until unblocking. Groups aren't affected.
