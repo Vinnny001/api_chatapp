@@ -21,6 +21,8 @@ const userSchema = new mongoose.Schema(
       default: undefined,
       select: false,
     },
+    // "Sign out everywhere" / password reset: login tokens issued before this stop working.
+    sessionsValidAfter: { type: Date, default: undefined },
     // Switched off by an admin: can't sign in or use the app.
     disabled: { type: Boolean, default: undefined },
     // People this user blocked (they can't message, call or see them).

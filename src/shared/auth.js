@@ -5,8 +5,8 @@ import { config } from './config.js';
  * A login token. `pending` tokens belong to accounts whose email isn't confirmed yet: they
  * only work for the email-code routes, never for chatting (verifyToken rejects them).
  */
-export function signToken(userId, { pending = false } = {}) {
-  return jwt.sign({ sub: String(userId), ...(pending && { pending: true }) }, config.jwtSecret, {
+export function signToken(userId, { pending = false, deviceId } = {}) {
+  return jwt.sign({ sub: String(userId), ...(pending && { pending: true }), ...(deviceId && { did: String(deviceId) }) }, config.jwtSecret, {
     expiresIn: pending ? '2d' : config.jwtExpiresIn,
   });
 }
@@ -17,6 +17,20 @@ export function verifyToken(token) {
     const payload = jwt.verify(token, config.jwtSecret);
     if (payload.pending) return null;
     return typeof payload.sub === 'string' ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The payload of a full (not pending) login token, or null. `did` is the device it was
+ * issued to (absent on tokens from before devices existed).
+ */
+export function readToken(token) {
+  try {
+    const payload = jwt.verify(token, config.jwtSecret);
+    if (payload.pending || typeof payload.sub !== 'string') return null;
+    return payload;
   } catch {
     return null;
   }

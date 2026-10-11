@@ -1,17 +1,20 @@
-import { User, verifyToken } from '#shared';
+import { authenticate } from '#shared';
 import { HttpError } from './errors.js';
 
-/** A valid (confirmed-email) login of an account that isn't disabled. */
+/**
+ * A valid (confirmed-email) login of an account that isn't disabled, from a device that
+ * hasn't been signed out. Sets req.userId and req.deviceId (null for pre-device tokens).
+ */
 export async function requireAuth(req, _res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  const userId = token && verifyToken(token);
-  if (!userId) return next(new HttpError(401, 'Not signed in'));
   try {
-    if (!(await User.exists({ _id: userId, disabled: { $ne: true } }))) return next(new HttpError(401, 'Not signed in'));
+    const session = token && (await authenticate(token));
+    if (!session) return next(new HttpError(401, 'Not signed in'));
+    req.userId = session.userId;
+    req.deviceId = session.deviceId;
+    next();
   } catch (err) {
-    return next(err);
+    next(err);
   }
-  req.userId = userId;
-  next();
 }

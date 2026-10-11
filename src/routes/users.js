@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
-import { Conversation, EVENTS, Message, UPLOAD_URL_PATTERN, USER_FIELDS, User, escapeRegex, publicUser } from '#shared';
+import { Conversation, Device, EVENTS, Message, UPLOAD_URL_PATTERN, USER_FIELDS, User, escapeRegex, publicUser } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
 import { selfView } from '../admin.js';
 import { broadcastConversation, emitToConversations } from '../realtime.js';
@@ -103,6 +103,8 @@ router.post(
   handle(async (req, res) => {
     const { token, platform } = deviceSchema.parse(req.body);
     await User.updateMany({ 'devices.token': token }, { $pull: { devices: { token } } });
+    // Remember which signed-in device it belongs to, so signing that device out stops them.
+    if (req.deviceId) await Device.updateOne({ _id: req.deviceId }, { $set: { pushToken: token } });
     await User.updateOne(
       { _id: req.userId },
       { $push: { devices: { $each: [{ token, platform, updatedAt: new Date() }], $slice: -10 } } }

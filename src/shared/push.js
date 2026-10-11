@@ -54,6 +54,16 @@ const safely = (fn) => (...args) =>
 
 const previewOf = messagePreview;
 
+/** Someone is signing in on a new device: ask this account's phones to approve it. */
+export const pushLoginRequest = safely(async (userId, { requestId, deviceName }) => {
+  await pushData([idOf(userId)], { type: 'login_request', requestId, deviceName, sentAt: Date.now() }, { ttlSeconds: 600 });
+});
+
+/** The sign-in request was answered (here or elsewhere) or expired: remove the notification. */
+export const pushLoginRequestDone = safely(async (userId, requestId) => {
+  await pushData([idOf(userId)], { type: 'login_request_done', requestId }, { ttlSeconds: 600 });
+});
+
 /** New message → the other members' phones (not muted chats, not the sender). */
 export const pushNewMessage = safely(async (message, conversation) => {
   if (message.type === 'system' || message.type === 'call') return;

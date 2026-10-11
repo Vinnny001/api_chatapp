@@ -68,6 +68,13 @@ Emails go through Brevo's HTTP API (Render's free plan blocks SMTP): set `BREVO_
 - Mentions are written in the text as `@[label](userId)` (label = @username or number, never a private name). For group messages the server keeps the members mentioned in `message.mentions`, counts them per member as `me.unreadMentions` (reset when read or cleared) and pushes to them even if they muted the chat. Previews and push text show `@label`. Editing a message doesn't change who was mentioned.
 - `POST|DELETE /api/messages/:id/pin`: up to 3 pins per chat (a 4th replaces the oldest), by anyone who can send there; pinning adds a "… pinned a message" note. Conversations carry `pinned: [{messageId, by, at, sender, type, preview}]`.
 
+## Linked devices and sign-in approval
+
+- Every login token names its device (`did`); `requireAuth` and the realtime handshake check that the device isn't signed out and the token isn't older than `sessionsValidAfter`. Tokens from before devices exist keep working until the app registers them (`POST /api/devices/register`).
+- `POST /api/auth/login {identifier, password, device: {name, platform}}`: with no other active device it signs in (`approvedBy: first`); otherwise it answers `202 {approvalRequired, request: {id, secret, match}}`. The account's devices get `login:request` (and a `login_request` push), list them with `GET /api/devices/requests` (three numbers each) and answer with `POST /api/devices/requests/:id {approve, match}` (a wrong number denies it). The new device polls `GET /api/auth/login-requests/:id` (header `x-request-secret`), or uses `POST …/email` + `POST …/email/verify {code}`; `DELETE …` cancels. Requests expire after 10 minutes.
+- Each new device triggers a "New sign-in" email with a link to `GET|POST /devices/revoke/:token` (POST signs it out). Set `PUBLIC_API_URL` if the API's public address differs from the request host.
+- `GET /api/devices`, `DELETE /api/devices/:id`, `POST /api/devices/revoke-others` (returns a fresh token for this device), `POST /api/auth/logout`. A password reset signs out every other device.
+
 ## Polls and view once
 
 - Polls are messages of type `poll` sent like any other (`poll: {question, options: [text], multiple}`; 2–12 different options). `POST /api/messages/:id/vote {options: [optionId]}` replaces your vote in one atomic update (`[]` takes it back) and broadcasts `message:updated` with the new `poll`.

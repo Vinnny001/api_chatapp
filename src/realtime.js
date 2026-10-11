@@ -56,6 +56,11 @@ export function emitToConversations(conversationIds, event, payload, { exceptUse
 }
 
 /** Signs a user out everywhere right now (account disabled by an admin). */
+/** Closes the open connections of signed-out devices. */
+export function disconnectDevices(deviceIds) {
+  if (deviceIds.length) push({ op: 'disconnect', rooms: deviceIds.map((id) => rooms.device(idOf(id))) });
+}
+
 export function disconnectUser(userId) {
   push({ op: 'disconnect', rooms: [rooms.user(idOf(userId))] });
 }

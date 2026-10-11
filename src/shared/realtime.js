@@ -4,6 +4,7 @@
 export const rooms = {
   user: (id) => `user:${id}`,
   conv: (id) => `conv:${id}`,
+  device: (id) => `device:${id}`, // one signed-in device (signed out on its own)
 };
 
 // Media/avatars must be files uploaded through the API: either Cloudinary delivery URLs
@@ -24,6 +25,8 @@ export const EVENTS = {
   CONVERSATION_UPSERT: 'conversation:upsert',
   CONVERSATION_REMOVED: 'conversation:removed',
   USER_UPDATED: 'user:updated',
+  LOGIN_REQUEST: 'login:request', // a new device asks to sign in (to the account's devices)
+  LOGIN_REQUEST_DONE: 'login:request:done',
   CALL_INCOMING: 'call:incoming',
   CALL_ACCEPTED: 'call:accepted',
   CALL_REJECTED: 'call:rejected',

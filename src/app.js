@@ -10,6 +10,8 @@ import conversationRoutes from './routes/conversations.js';
 import groupCallRoutes from './routes/groupCalls.js';
 import adminRoutes from './routes/admin.js';
 import inviteRoutes, { invitePage } from './routes/invites.js';
+import deviceRoutes from './routes/devices.js';
+import { revokePage } from './routes/revokePage.js';
 import messageRoutes from './routes/messages.js';
 import uploadRoutes, { serveStoredFile, serveUploads } from './routes/uploads.js';
 
@@ -26,6 +28,8 @@ export function createApp() {
   app.use('/uploads', serveUploads);
   app.get('/files/:id/:name', serveStoredFile);
   app.get('/join/:code', invitePage);
+  app.get('/devices/revoke/:token', revokePage);
+  app.post('/devices/revoke/:token', revokePage);
   app.use('/api/uploads', uploadRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/users', requireAuth, userRoutes);
@@ -34,6 +38,7 @@ export function createApp() {
   app.use('/api/messages', requireAuth, messageRoutes);
   app.use('/api/admin', requireAuth, adminRoutes);
   app.use('/api/invites', requireAuth, inviteRoutes);
+  app.use('/api/devices', requireAuth, deviceRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

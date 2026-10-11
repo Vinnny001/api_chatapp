@@ -3,8 +3,21 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { User, config, publicUser, signToken, usernameProblem, verifyAnyToken } from '#shared';
+import {
+  EVENTS,
+  User,
+  activeDevices,
+  config,
+  pushLoginRequest,
+  pushLoginRequestDone,
+  signToken,
+  usernameProblem,
+  verifyAnyToken,
+} from '#shared';
 import { codeEmail, sendEmail } from '../email.js';
+import { LoginRequest } from '../models/LoginRequest.js';
+import { clientIp, revokeDevices, revokeOtherDevices, startSession } from '../devices.js';
+import { emitToUser } from '../realtime.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, handle } from '../middleware/errors.js';
 import { selfView } from '../admin.js';
@@ -38,12 +51,27 @@ const signupSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters').max(128),
 });
 
+// What the app says about the device it runs on ("ChatApp on Pixel 5", "Edge on Windows").
+const deviceSchema = z
+  .object({
+    name: z.string().trim().max(80).optional(),
+    platform: z.enum(['android', 'ios', 'web']).optional(),
+  })
+  .optional();
+
 const loginSchema = z.object({
   identifier: z.string().trim().min(1, 'Enter your email or phone'),
   password: z.string().min(1, 'Enter your password'),
+  device: deviceSchema,
 });
 
+function deviceOf(req, device) {
+  return { name: device?.name || 'Unknown device', platform: device?.platform || 'web', ip: clientIp(req) };
+}
+
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+// The new device checks every couple of seconds while it waits for approval.
+const pollLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false });
 
 const router = Router();
 
@@ -154,7 +182,179 @@ router.post(
     }
     if (user.disabled) throw new HttpError(403, 'This account has been disabled. Contact support.');
     if (user.emailVerified === false) return res.json(pendingSession(user, await trySendCode(user, 'verify')));
-    res.json({ token: signToken(user._id), user: selfView(user) });
+
+    const info = deviceOf(req, req.body.device);
+    const approvers = await activeDevices(user._id);
+    if (!approvers.length) {
+      // No other device is signed in: the password is enough (and the email tells them).
+      const { token } = await startSession(user, { ...info, approvedBy: 'first', req });
+      return res.json({ token, user: selfView(user) });
+    }
+    // Another device is signed in: it has to approve this one (or a code sent to the email).
+    const secret = crypto.randomBytes(24).toString('base64url');
+    const request = await LoginRequest.create({
+      user: user._id,
+      secretHash: sha256(secret),
+      ...info,
+      match: crypto.randomInt(10, 100),
+      expiresAt: new Date(Date.now() + REQUEST_TTL_MS),
+    });
+    announceRequest(request);
+    res.status(202).json({
+      approvalRequired: true,
+      request: { id: String(request._id), secret, match: request.match, expiresAt: request.expiresAt },
+      devices: approvers.slice(0, 3).map((d) => d.name),
+      email: maskEmail(user.email),
+    });
+  })
+);
+
+// ---- Sign-in approval for a new device
+
+const REQUEST_TTL_MS = 10 * 60 * 1000;
+const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+const maskEmail = (email) => email.replace(/^(.)(.*)(.@.*)$/, (_, a, b, c) => a + '•'.repeat(Math.min(b.length, 6)) + c);
+
+/** Three numbers to pick from on the approving device: the right one plus two others, stable per request. */
+export function matchChoices(request) {
+  const seed = parseInt(sha256(`${request._id}:${request.secretHash}`).slice(0, 8), 16);
+  const others = new Set();
+  for (let i = 0; others.size < 2; i++) {
+    const n = 10 + ((seed >>> (i % 24)) + i * 37) % 90;
+    if (n !== request.match) others.add(n);
+  }
+  const all = [request.match, ...others];
+  const shift = seed % 3;
+  return [...all.slice(shift), ...all.slice(0, shift)];
+}
+
+export function requestView(r) {
+  return {
+    id: String(r._id),
+    name: r.name,
+    platform: r.platform,
+    ip: r.ip,
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+    choices: matchChoices(r),
+  };
+}
+
+/** Tells the account's signed-in devices (open apps live, phones by push). */
+function announceRequest(request) {
+  emitToUser(request.user, EVENTS.LOGIN_REQUEST, requestView(request));
+  pushLoginRequest(request.user, { requestId: String(request._id), deviceName: request.name });
+}
+
+export function announceRequestDone(request) {
+  emitToUser(request.user, EVENTS.LOGIN_REQUEST_DONE, { id: String(request._id), status: request.status });
+  pushLoginRequestDone(request.user, String(request._id));
+}
+
+/** The new device's own request (it proves it with the secret only it was given). */
+async function ownRequest(req) {
+  const secret = req.get('x-request-secret') || req.body?.secret || '';
+  const request = /^[a-f0-9]{24}$/.test(req.params.id) ? await LoginRequest.findById(req.params.id) : null;
+  if (!request || request.secretHash !== sha256(secret)) throw new HttpError(404, 'Sign-in request not found');
+  return request;
+}
+
+const expired = (r) => r.expiresAt < new Date();
+
+/** Hands the approved request its login, once. */
+async function collect(request, req, res) {
+  const taken = await LoginRequest.findOneAndUpdate({ _id: request._id, status: 'approved' }, { $set: { status: 'used' } }, { new: true });
+  if (!taken) throw new HttpError(410, 'This sign-in was already completed');
+  const user = await User.findById(request.user);
+  if (!user || user.disabled) throw new HttpError(403, 'This account has been disabled. Contact support.');
+  const { token } = await startSession(user, {
+    name: request.name,
+    platform: request.platform,
+    ip: request.ip,
+    approvedBy: request.method,
+    approver: request.approver,
+    req,
+  });
+  res.json({ status: 'approved', token, user: selfView(user) });
+}
+
+/** The new device waits here: pending → approved (with the login) / denied / expired. */
+router.get(
+  '/login-requests/:id',
+  pollLimiter,
+  handle(async (req, res) => {
+    const request = await ownRequest(req);
+    if (request.status === 'approved') return collect(request, req, res);
+    if (request.status === 'pending' && expired(request)) return res.json({ status: 'expired' });
+    res.json({ status: request.status === 'used' ? 'expired' : request.status });
+  })
+);
+
+/** Can't reach the other device: send a code to the account's email instead. */
+router.post(
+  '/login-requests/:id/email',
+  authLimiter,
+  handle(async (req, res) => {
+    const request = await ownRequest(req);
+    if (request.status !== 'pending' || expired(request)) throw new HttpError(410, 'This sign-in request has expired. Sign in again.');
+    if (request.emailCode?.sentAt && Date.now() - request.emailCode.sentAt < 60_000) {
+      throw new HttpError(429, 'Wait a minute before asking for another code');
+    }
+    const user = await User.findById(request.user, 'email');
+    const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+    request.emailCode = { hash: sha256(`${request._id}:${code}`), attempts: 0, sentAt: new Date() };
+    await request.save();
+    await sendEmail({ to: user.email, ...codeEmail({ code, purpose: 'login' }) });
+    res.json({ ok: true, email: maskEmail(user.email) });
+  })
+);
+
+router.post(
+  '/login-requests/:id/email/verify',
+  authLimiter,
+  handle(async (req, res) => {
+    const { code } = z.object({ code: sixDigits }).parse(req.body);
+    const request = await ownRequest(req);
+    if (request.status !== 'pending' || expired(request)) throw new HttpError(410, 'This sign-in request has expired. Sign in again.');
+    const c = request.emailCode;
+    if (!c) throw new HttpError(400, 'Ask for a code first');
+    if (c.attempts >= MAX_ATTEMPTS) throw new HttpError(429, 'Too many wrong codes. Sign in again.');
+    if (c.hash !== sha256(`${request._id}:${code}`)) {
+      await LoginRequest.updateOne({ _id: request._id }, { $inc: { 'emailCode.attempts': 1 } });
+      throw new HttpError(400, 'Wrong code. Check the email and try again.');
+    }
+    const approved = await LoginRequest.findOneAndUpdate(
+      { _id: request._id, status: 'pending' },
+      { $set: { status: 'approved', method: 'email' } },
+      { new: true }
+    );
+    if (!approved) throw new HttpError(410, 'This sign-in request was already answered');
+    announceRequestDone(approved);
+    return collect(approved, req, res);
+  })
+);
+
+/** The new device gave up waiting. */
+router.delete(
+  '/login-requests/:id',
+  handle(async (req, res) => {
+    const request = await ownRequest(req);
+    if (request.status === 'pending') {
+      request.status = 'denied';
+      await request.save();
+      announceRequestDone(request);
+    }
+    res.json({ ok: true });
+  })
+);
+
+/** Sign out on this device. */
+router.post(
+  '/logout',
+  requireAuth,
+  handle(async (req, res) => {
+    if (req.deviceId) await revokeDevices(req.userId, [req.deviceId]);
+    res.json({ ok: true });
   })
 );
 
@@ -166,13 +366,15 @@ router.post(
   authLimiter,
   requireAnyAuth,
   handle(async (req, res) => {
-    const { code } = z.object({ code: sixDigits }).parse(req.body);
+    const { code, device } = z.object({ code: sixDigits, device: deviceSchema }).parse(req.body);
     const existing = await User.findById(req.userId);
     if (!existing) throw new HttpError(401, 'Account no longer exists');
-    if (existing.emailVerified !== false) return res.json({ token: signToken(existing._id), user: selfView(existing) });
+    if (existing.emailVerified !== false) throw new HttpError(400, 'Your email is already confirmed. Sign in again.');
     await checkCode(req.userId, 'verify', code);
     const user = await User.findByIdAndUpdate(req.userId, { $set: { emailVerified: true } }, { new: true });
-    res.json({ token: signToken(user._id), user: selfView(user) });
+    // The code proves the email: this device starts the account's first session.
+    const { token } = await startSession(user, { ...deviceOf(req, device), approvedBy: 'signup', req, alert: false });
+    res.json({ token, user: selfView(user) });
   })
 );
 
@@ -209,11 +411,12 @@ router.post(
   '/reset',
   authLimiter,
   handle(async (req, res) => {
-    const { email, code, password } = z
+    const { email, code, password, device } = z
       .object({
         email: z.string().trim().toLowerCase().email('Enter a valid email'),
         code: sixDigits,
         password: z.string().min(6, 'Password must be at least 6 characters').max(128),
+        device: deviceSchema,
       })
       .parse(req.body);
     const found = await User.findOne({ email });
@@ -225,7 +428,10 @@ router.post(
       { $set: { passwordHash: await bcrypt.hash(password, 10), emailVerified: true } },
       { new: true }
     );
-    res.json({ token: signToken(user._id), user: selfView(user) });
+    // A new password signs out every device (someone else may have had the old one).
+    await revokeOtherDevices(user._id, null);
+    const { token } = await startSession(user, { ...deviceOf(req, device), approvedBy: 'reset', req });
+    res.json({ token, user: selfView(user) });
   })
 );
 

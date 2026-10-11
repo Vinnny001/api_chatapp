@@ -2,9 +2,11 @@
 // the same MongoDB collections, so keep src/shared/models and serialize.js identical in both.
 export { config, corsOriginOption } from './config.js';
 export { connectMongo } from './db.js';
-export { signToken, verifyAnyToken, verifyToken } from './auth.js';
+export { readToken, signToken, verifyAnyToken, verifyToken } from './auth.js';
 export { rooms, EVENTS, UPLOAD_URL_PATTERN, INTERNAL_EVENTS_PATH } from './realtime.js';
 export { User } from './models/User.js';
+export { Device } from './models/Device.js';
+export * from './sessions.js';
 export { Conversation } from './models/Conversation.js';
 export { Message, MESSAGE_TYPES, MAX_TEXT_LENGTH } from './models/Message.js';
 export * from './serialize.js';
@@ -15,6 +17,8 @@ export {
   pushCallEnded,
   pushGroupCall,
   pushIncomingCall,
+  pushLoginRequest,
+  pushLoginRequestDone,
   pushNewMessage,
   pushReaction,
   pushReactionRemoved,
