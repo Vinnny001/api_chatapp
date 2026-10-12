@@ -66,6 +66,12 @@ const messageSchema = new mongoose.Schema(
     deletedForEveryone: { type: Boolean, default: false },
     editedAt: { type: Date, default: null },
     expiresAt: { type: Date, default: undefined },
+    // End-to-end encrypted content: an MLS application message (base64) made in `epoch` by
+    // the sender's `device`. The server can't read it; `text` stays empty.
+    e2ee: {
+      type: { _id: false, ciphertext: String, epoch: Number, device: { type: ObjectId, ref: 'Device' } },
+      default: undefined,
+    },
   },
   { timestamps: true }
 );

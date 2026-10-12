@@ -9,7 +9,7 @@ export function withConversationRefs(query) {
   return query
     .populate('participants.user', USER_FIELDS)
     .populate({ path: 'lastMessage', populate: REPLY_POPULATE })
-    .populate({ path: 'pinned.message', select: 'sender type text media call deletedForEveryone viewOnce poll.question' });
+    .populate({ path: 'pinned.message', select: 'sender type text media call deletedForEveryone viewOnce poll.question e2ee' });
 }
 
 export function findConversationForUser(conversationId, userId) {
@@ -36,6 +36,8 @@ export async function createMessage({
   forwarded = false,
   viewOnce = false, // photos/videos only
   poll, // { question, options: [text], multiple }
+  e2ee, // { ciphertext, epoch, device }: encrypted on the sender's device
+  mentionIds = [], // who an encrypted message mentions (the server can't read it to find out)
   clientId,
   call,
   countsAsUnread = true, // false for call log entries the recipient already saw (answered/declined)
@@ -43,10 +45,9 @@ export async function createMessage({
 }) {
   // @mentions: only members of this group, never the sender.
   const members = new Set(conversation.participants.map((p) => idOf(p.user)));
+  const mentioned = e2ee ? mentionIds.map(String) : text ? [...text.matchAll(MENTION_TOKEN)].map((m) => m[2]) : [];
   const mentions =
-    conversation.type === 'group' && text
-      ? [...new Set([...text.matchAll(MENTION_TOKEN)].map((m) => m[2]))].filter((id) => members.has(id) && id !== idOf(senderId))
-      : [];
+    conversation.type === 'group' ? [...new Set(mentioned)].filter((id) => members.has(id) && id !== idOf(senderId)) : [];
   const expiresAt =
     conversation.disappearingSeconds > 0
       ? new Date(Date.now() + conversation.disappearingSeconds * 1000)
@@ -76,6 +77,7 @@ export async function createMessage({
         }),
       expiresAt,
       ...(mentions.length && { mentions }),
+      ...(e2ee && { e2ee, text: '' }),
       ...(hiddenFrom.length && { deletedFor: hiddenFrom }),
     });
   } catch (err) {

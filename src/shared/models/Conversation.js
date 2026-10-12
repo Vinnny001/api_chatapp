@@ -33,6 +33,18 @@ const conversationSchema = new mongoose.Schema(
     createdBy: { type: ObjectId, ref: 'User' },
     onlyAdminsCanSend: { type: Boolean, default: false },
     disappearingSeconds: { type: Number, default: 0 },
+    // End-to-end encryption (MLS). The server only orders key changes (one commit per epoch)
+    // and keeps the public group info new devices join with; it never has any keys.
+    mls: {
+      type: {
+        _id: false,
+        enabled: { type: Boolean, default: false }, // once on, text messages must be encrypted
+        epoch: { type: Number, default: 0 }, // the group's current epoch (the next commit must be made in it)
+        groupInfo: { type: String, default: undefined }, // latest public GroupInfo (base64), for self-joins
+        startedBy: { type: ObjectId, ref: 'Device' },
+      },
+      default: undefined,
+    },
     lastMessage: { type: ObjectId, ref: 'Message', default: null },
     lastMessageAt: { type: Date, default: Date.now },
     // Group invite link code (admins share https://<api>/join/<code>); reset = new code.

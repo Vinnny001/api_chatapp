@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { Device, User, config, signToken } from '#shared';
 import { newDeviceEmail, sendEmail } from './email.js';
 import { disconnectDevices } from './realtime.js';
+import { announceRoster } from './routes/mls.js';
 
 /** What the app shows in Linked devices. */
 export function deviceView(d, currentId) {
@@ -44,6 +45,8 @@ export async function revokeDevices(userId, deviceIds) {
   const tokens = devices.map((d) => d.pushToken).filter(Boolean);
   if (tokens.length) await User.updateOne({ _id: userId }, { $pull: { devices: { token: { $in: tokens } } } });
   disconnectDevices(devices.map((d) => d._id));
+  // Chats re-check their encryption groups: the next message removes these devices.
+  announceRoster(userId).catch(() => {});
 }
 
 /** Everything but `keep`, including tokens from before devices existed. */

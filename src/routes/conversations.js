@@ -553,6 +553,10 @@ const sendSchema = z
     replyTo: objectId.nullish(),
     forwarded: z.boolean().optional(),
     viewOnce: z.boolean().optional(),
+    e2ee: z
+      .object({ ciphertext: z.string().min(16).max(400_000).regex(/^[A-Za-z0-9+/=]+$/), epoch: z.number().int().min(0) })
+      .optional(),
+    mentions: z.array(objectId).max(512).optional(), // encrypted messages say whom they mention
     poll: z
       .object({
         question: z.string().trim().min(1, 'Ask a question').max(300),
@@ -562,7 +566,8 @@ const sendSchema = z
       .refine((p) => new Set(p.options.map((o) => o.toLowerCase())).size === p.options.length, 'Options must be different')
       .optional(),
   })
-  .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 : d.type === 'poll' ? !!d.poll : !!d.media), 'Message is empty')
+  .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 || !!d.e2ee : d.type === 'poll' ? !!d.poll : !!d.media), 'Message is empty')
+  .refine((d) => !d.e2ee || (d.type === 'text' && !d.text), 'Only text messages are encrypted for now')
   .refine((d) => !d.viewOnce || d.type === 'image' || d.type === 'video', 'Only photos and videos can be view once');
 
 /**
@@ -581,6 +586,10 @@ router.post(
       data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conv._id })) ? data.replyTo : null;
     const block = await blockStatus(conv, req.userId);
     if (block.iBlocked) throw new HttpError(403, 'You blocked this contact. Unblock them to send a message.');
+    if (conv.mls?.enabled && data.type === 'text' && !data.e2ee) {
+      throw new HttpError(409, 'This chat is end-to-end encrypted. Update ChatApp to send messages here.');
+    }
+    if (data.e2ee && !req.deviceId) throw new HttpError(400, 'Update ChatApp to send encrypted messages.');
     const { message, duplicate } = await createMessage({
       conversation: conv,
       senderId: req.userId,
@@ -591,6 +600,7 @@ router.post(
       forwarded: data.forwarded,
       viewOnce: data.viewOnce,
       poll: data.poll,
+      ...(data.e2ee && { e2ee: { ...data.e2ee, device: req.deviceId }, mentionIds: data.mentions || [] }),
       clientId: data.clientId,
       hiddenFrom: block.blockedMe ? [block.peerId] : [], // they blocked me: never reaches them
     });

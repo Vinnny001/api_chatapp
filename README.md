@@ -68,6 +68,15 @@ Emails go through Brevo's HTTP API (Render's free plan blocks SMTP): set `BREVO_
 - Mentions are written in the text as `@[label](userId)` (label = @username or number, never a private name). For group messages the server keeps the members mentioned in `message.mentions`, counts them per member as `me.unreadMentions` (reset when read or cleared) and pushes to them even if they muted the chat. Previews and push text show `@label`. Editing a message doesn't change who was mentioned.
 - `POST|DELETE /api/messages/:id/pin`: up to 3 pins per chat (a 4th replaces the oldest), by anyone who can send there; pinning adds a "… pinned a message" note. Conversations carry `pinned: [{messageId, by, at, sender, type, preview}]`.
 
+## End-to-end encryption (delivery service)
+
+The server never holds a key. `/api/mls` (signed-in device required):
+- `POST /identity {key}`: the device's MLS signature public key (set once). `GET /keys?devices=` returns registered keys (devices pin the first key they see).
+- `POST /key-packages {packages:[{id,data}]}`, `GET /key-packages/count`, `POST /key-packages/claim {conversationId, deviceIds}`: one-time KeyPackages, so devices can be added while offline (only for devices of the chat's members).
+- `GET /:id`: encryption status, current epoch, public GroupInfo and the chat's devices (active, not signed out, with a key). `POST /:id/start` turns encryption on once every member has a capable device.
+- `POST /:id/commits {epoch, commit, groupInfo, welcomes}`: exactly one key change per epoch is accepted; anyone else gets `409 {epoch}` and catches up. `GET /:id/commits?from=` replays them in order. Welcomes wait in `GET /welcomes/mine` until the added device takes them.
+- Messages: `e2ee: {ciphertext, epoch}` (text left empty) plus `mentions: [userIds]` for the notification. In an encrypted chat, plain text messages are refused (409). Pushes say "🔒 New message". Events: `mls:commit`, `mls:welcome`, `mls:roster`.
+
 ## Linked devices and sign-in approval
 
 - Every login token names its device (`did`); `requireAuth` and the realtime handshake check that the device isn't signed out and the token isn't older than `sessionsValidAfter`. Tokens from before devices exist keep working until the app registers them (`POST /api/devices/register`).

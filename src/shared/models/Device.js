@@ -19,6 +19,9 @@ const deviceSchema = new mongoose.Schema(
     ip: { type: String, default: undefined },
     lastActiveAt: { type: Date, default: Date.now },
     pushToken: { type: String, default: undefined }, // this device's FCM token, removed with it
+    // End-to-end encryption identity: the device's MLS signature public key (base64). Set
+    // once; a device never changes it (a new key means a new device).
+    mlsKey: { type: String, default: undefined },
     revokedAt: { type: Date, default: null },
   },
   { timestamps: true }

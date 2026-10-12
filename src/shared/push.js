@@ -89,7 +89,9 @@ export const pushNewMessage = safely(async (message, conversation) => {
     senderId,
     senderName: label,
     senderAvatar: sender?.avatarUrl,
-    text: previewOf(message).slice(0, 500),
+    // Encrypted messages: the phone can't read them without the app, so just "New message".
+    text: message.e2ee?.ciphertext ? '🔒 New message' : previewOf(message).slice(0, 500),
+    e2ee: message.e2ee?.ciphertext ? '1' : '0', // the phone's Reply goes through the app (it encrypts)
     sentAt: new Date(message.createdAt).getTime(),
   };
   // The whole message, so the app can show it straight away even if the phone is offline

@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 // Shapes sent to clients. Both services use these so REST and socket payloads match exactly.
 
 export const USER_FIELDS = 'username phone email avatarUrl about lastSeen settings blocked';
-export const REPLY_POPULATE = { path: 'replyTo', select: 'sender type text media deletedForEveryone viewOnce poll.question' };
+export const REPLY_POPULATE = { path: 'replyTo', select: 'sender type text media deletedForEveryone viewOnce poll.question e2ee.epoch' };
 
 export const isObjectId = (v) => v instanceof mongoose.Types.ObjectId;
 export const idOf = (v) => (v == null ? null : String(v._id ?? v));
@@ -51,6 +51,7 @@ function replyPreview(r) {
     mediaName: r.deletedForEveryone ? undefined : r.media?.name,
     mediaUrl: !r.deletedForEveryone && !r.viewOnce && r.type === 'image' ? r.media?.url : undefined,
     ...(r.viewOnce && { viewOnce: true }),
+    ...(r.e2ee?.epoch != null && { e2ee: true }), // the app shows its own decrypted copy
     deletedForEveryone: !!r.deletedForEveryone,
   };
 }
@@ -98,6 +99,7 @@ export function serializeMessage(m, viewerId) {
       : null,
     reactions: (m.reactions || []).map((r) => ({ user: idOf(r.user), emoji: r.emoji })),
     mentions: (m.mentions || []).map(idOf),
+    ...(m.e2ee?.ciphertext && !deleted && { e2ee: { ciphertext: m.e2ee.ciphertext, epoch: m.e2ee.epoch, device: idOf(m.e2ee.device) } }),
     ...(m.viewOnce && { viewOnce: true, openedBy: (m.openedBy || []).map(idOf) }),
     ...(m.poll?.question && !deleted && { poll: serializePoll(m.poll) }),
     deletedForEveryone: deleted,
@@ -118,6 +120,7 @@ export const plainMentions = (text = '') => text.replace(MENTION_TOKEN, (_, labe
 /** One-line description of a message (notifications, "reacted to …"). */
 export function messagePreview(message) {
   if (!message) return '';
+  if (message.e2ee?.ciphertext) return '🔒 Message'; // only the recipients' devices can read it
   if (message.type === 'text' || message.type === 'system') return plainMentions(message.text || '');
   if (message.type === 'file') return `📄 ${message.media?.name || 'Document'}`;
   if (message.type === 'call') return message.call?.kind === 'video' ? '📹 Video call' : '📞 Voice call';
@@ -155,6 +158,7 @@ export function serializeConversation(c, viewerId) {
     createdBy: idOf(c.createdBy),
     onlyAdminsCanSend: !!c.onlyAdminsCanSend,
     disappearingSeconds: c.disappearingSeconds || 0,
+    e2ee: !!c.mls?.enabled,
     lastReaction: serializeReaction(c.lastReaction),
     groupCall: serializeGroupCall(c.groupCall),
     // Pinned messages that still exist (populated by withConversationRefs).
