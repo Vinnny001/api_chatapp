@@ -67,7 +67,8 @@ const router = Router();
 
 async function loadForUser(req) {
   const conv = await findConversationForUser(req.params.id, req.userId);
-  if (!conv) throw new HttpError(404, 'Conversation not found');
+  // (The hidden own-devices channel isn't a chat: none of the chat routes apply to it.)
+  if (!conv || conv.type === 'self') throw new HttpError(404, 'Conversation not found');
   return conv;
 }
 
@@ -99,7 +100,7 @@ router.get(
   '/',
   handle(async (req, res) => {
     const convs = await withConversationRefs(
-      Conversation.find({ 'participants.user': req.userId }).sort({ lastMessageAt: -1 })
+      Conversation.find({ 'participants.user': req.userId, type: { $ne: 'self' } }).sort({ lastMessageAt: -1 })
     );
     res.json({ conversations: convs.map((c) => serializeConversation(c, req.userId)) });
   })

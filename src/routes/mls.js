@@ -3,8 +3,8 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Conversation, DEVICE_ACTIVE_MS, Device, EVENTS, findConversationForUser, sameId } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
-import { KeyPackage, MlsCommit, MlsWelcome } from '../models/Mls.js';
-import { broadcastConversation, emitToConversations, emitToDevices } from '../realtime.js';
+import { KeyPackage, MlsCommit, MlsWelcome, SyncMessage } from '../models/Mls.js';
+import { broadcastConversation, emitToConversations, emitToDevices, emitToUser } from '../realtime.js';
 
 // End-to-end encryption (MLS) delivery service. The server:
 //   - keeps each device's signature public key (its encryption identity),
@@ -117,6 +117,48 @@ router.post(
   })
 );
 
+// ---- The encrypted channel between my own devices (an MLS group of just my devices)
+
+/** My own-devices channel (created on first use; one per account). */
+router.post(
+  '/self',
+  handle(async (req, res) => {
+    needDevice(req);
+    const conv = await Conversation.findOneAndUpdate(
+      { selfOf: req.userId },
+      { $setOnInsert: { type: 'self', selfOf: req.userId, participants: [{ user: req.userId, role: 'admin' }] } },
+      { upsert: true, new: true }
+    ).catch(async (err) => {
+      if (err.code === 11000) return Conversation.findOne({ selfOf: req.userId }); // created at the same moment elsewhere
+      throw err;
+    });
+    res.json({ conversationId: String(conv._id) });
+  })
+);
+
+/** Posts an encrypted message to my other devices. */
+router.post(
+  '/sync',
+  handle(async (req, res) => {
+    needDevice(req);
+    const { ciphertext, epoch } = z.object({ ciphertext: z.string().min(16).max(700_000).regex(/^[A-Za-z0-9+/=]+$/), epoch: z.number().int().min(0) }).parse(req.body);
+    const msg = await SyncMessage.create({ user: req.userId, device: req.deviceId, epoch, ciphertext });
+    emitToUser(req.userId, EVENTS.MLS_SYNC, { id: String(msg._id) });
+    res.status(201).json({ id: String(msg._id) });
+  })
+);
+
+/** My own-devices messages after `after` (an id), oldest first. */
+router.get(
+  '/sync',
+  handle(async (req, res) => {
+    needDevice(req);
+    const after = mongoose.isValidObjectId(req.query.after) ? { _id: { $gt: req.query.after } } : {};
+    const list = await SyncMessage.find({ user: req.userId, ...after }).sort({ _id: 1 }).limit(50).lean();
+    res.json({ messages: list.map((m) => ({ id: String(m._id), device: String(m.device), epoch: m.epoch, ciphertext: m.ciphertext, at: m.createdAt })) });
+  })
+);
+
 /** A chat's encryption status, its devices, and the public info for joining. */
 router.get(
   '/:id',
@@ -140,7 +182,7 @@ router.post(
       { $set: { mls: { enabled: true, epoch: 0, startedBy: req.deviceId } } }
     );
     if (!started.modifiedCount) throw new HttpError(409, 'Encryption is already on');
-    await broadcastConversation(conv._id); // every member's app now shows the chat as encrypted
+    if (conv.type !== 'self') await broadcastConversation(conv._id); // every member's app now shows the chat as encrypted
     res.json({ ok: true, epoch: 0 });
   })
 );

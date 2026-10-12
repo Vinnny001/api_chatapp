@@ -23,7 +23,10 @@ const participantSchema = new mongoose.Schema(
 
 const conversationSchema = new mongoose.Schema(
   {
-    type: { type: String, enum: ['direct', 'group'], required: true },
+    // 'self': hidden, the encrypted channel between one user's own devices (history transfer,
+    // contact sync). Never listed as a chat.
+    type: { type: String, enum: ['direct', 'group', 'self'], required: true },
+    selfOf: { type: ObjectId, ref: 'User', unique: true, sparse: true },
     // Sorted "<userA>:<userB>" so there is only ever one direct chat per pair.
     directKey: { type: String, unique: true, sparse: true },
     participants: [participantSchema],

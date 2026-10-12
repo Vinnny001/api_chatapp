@@ -48,3 +48,19 @@ const mlsWelcomeSchema = new mongoose.Schema(
 );
 mlsWelcomeSchema.index({ createdAt: 1 }, { expireAfterSeconds: 45 * 24 * 3600 });
 export const MlsWelcome = mongoose.models.MlsWelcome || mongoose.model('MlsWelcome', mlsWelcomeSchema);
+
+/**
+ * A message on the encrypted channel between one user's own devices (history for a newly
+ * linked device, address-book contacts). Ciphertext only; kept 30 days.
+ */
+const syncMessageSchema = new mongoose.Schema(
+  {
+    user: { type: ObjectId, ref: 'User', required: true, index: true },
+    device: { type: ObjectId, ref: 'Device', required: true }, // the sender
+    epoch: { type: Number, required: true },
+    ciphertext: { type: String, required: true },
+  },
+  { timestamps: true }
+);
+syncMessageSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 3600 });
+export const SyncMessage = mongoose.models.SyncMessage || mongoose.model('SyncMessage', syncMessageSchema);

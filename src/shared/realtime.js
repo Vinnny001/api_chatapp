@@ -30,6 +30,7 @@ export const EVENTS = {
   MLS_COMMIT: 'mls:commit', // a chat's encryption group changed epoch (catch up)
   MLS_WELCOME: 'mls:welcome', // this device was added to a chat's encryption group
   MLS_ROSTER: 'mls:roster', // a member's devices changed (re-check the group before sending)
+  MLS_SYNC: 'mls:sync', // a message on the encrypted channel between my own devices
   CALL_INCOMING: 'call:incoming',
   CALL_ACCEPTED: 'call:accepted',
   CALL_REJECTED: 'call:rejected',
