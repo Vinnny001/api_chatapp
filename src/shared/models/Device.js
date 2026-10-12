@@ -25,6 +25,11 @@ const deviceSchema = new mongoose.Schema(
     // Sync with my other devices (history + contacts)? Undecided until the user chooses on a
     // new device. Not syncing: this device sees only messages from `historyFrom` (its sign-in) on.
     sync: { type: Boolean, default: undefined },
+    // Why end-to-end encryption couldn't start on this device (reported by the app; cleared once it works).
+    mlsError: {
+      type: { _id: false, stage: String, message: String, browser: String, at: Date },
+      default: undefined,
+    },
     historyFrom: { type: Date, default: undefined },
     revokedAt: { type: Date, default: null },
   },

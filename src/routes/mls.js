@@ -59,9 +59,22 @@ router.post(
     const device = await Device.findById(req.deviceId, 'mlsKey');
     if (device.mlsKey && device.mlsKey !== key) throw new HttpError(409, 'This device already has an encryption key');
     if (!device.mlsKey) {
-      await Device.updateOne({ _id: req.deviceId }, { $set: { mlsKey: key } });
+      await Device.updateOne({ _id: req.deviceId }, { $set: { mlsKey: key }, $unset: { mlsError: 1 } });
       announceRoster(req.userId).catch(() => {});
     }
+    res.json({ ok: true });
+  })
+);
+
+/** The app couldn't start encryption on this device: keep the reason (support / diagnosis). */
+router.post(
+  '/diagnostic',
+  handle(async (req, res) => {
+    needDevice(req);
+    const { stage, message, browser } = z
+      .object({ stage: z.string().max(40), message: z.string().max(500), browser: z.string().max(300).optional() })
+      .parse(req.body);
+    await Device.updateOne({ _id: req.deviceId }, { $set: { mlsError: { stage, message, browser, at: new Date() } } });
     res.json({ ok: true });
   })
 );
