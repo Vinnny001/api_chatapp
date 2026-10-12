@@ -20,13 +20,13 @@ export async function authenticate(token) {
   const user = await User.findById(userId, 'disabled sessionsValidAfter').lean();
   if (!user || user.disabled) return null;
   if (user.sessionsValidAfter && payload.iat * 1000 < user.sessionsValidAfter.getTime()) return null;
-  if (!payload.did) return { userId, deviceId: null };
-  const device = await Device.findOne({ _id: payload.did, user: userId }, 'revokedAt lastActiveAt').lean();
+  if (!payload.did) return { userId, deviceId: null, historyFrom: null };
+  const device = await Device.findOne({ _id: payload.did, user: userId }, 'revokedAt lastActiveAt historyFrom').lean();
   if (!device || device.revokedAt) return null;
   if (Date.now() - (device.lastActiveAt?.getTime() || 0) > TOUCH_EVERY_MS) {
     Device.updateOne({ _id: device._id }, { $set: { lastActiveAt: new Date() } }).catch(() => {});
   }
-  return { userId, deviceId: String(device._id) };
+  return { userId, deviceId: String(device._id), historyFrom: device.historyFrom || null };
 }
 
 /** Devices that can approve a new sign-in (not signed out, used recently). */

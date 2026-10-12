@@ -22,6 +22,10 @@ const deviceSchema = new mongoose.Schema(
     // End-to-end encryption identity: the device's MLS signature public key (base64). Set
     // once; a device never changes it (a new key means a new device).
     mlsKey: { type: String, default: undefined },
+    // Sync with my other devices (history + contacts)? Undecided until the user chooses on a
+    // new device. Not syncing: this device sees only messages from `historyFrom` (its sign-in) on.
+    sync: { type: Boolean, default: undefined },
+    historyFrom: { type: Date, default: undefined },
     revokedAt: { type: Date, default: null },
   },
   { timestamps: true }

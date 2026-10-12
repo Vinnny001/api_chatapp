@@ -102,7 +102,7 @@ router.get(
     const convs = await withConversationRefs(
       Conversation.find({ 'participants.user': req.userId, type: { $ne: 'self' } }).sort({ lastMessageAt: -1 })
     );
-    res.json({ conversations: convs.map((c) => serializeConversation(c, req.userId)) });
+    res.json({ conversations: convs.map((c) => serializeConversation(c, req.userId, { historyFrom: req.historyFrom })) });
   })
 );
 
@@ -128,12 +128,12 @@ function kindFilter(kind, userId) {
 }
 
 /** The messages I may see in each chat: since I joined (groups) / since I cleared it. */
-function visibleIn(conversations, userId) {
+function visibleIn(conversations, userId, historyFrom = null) {
   return conversations.map((c) => {
     const me = c.participants.find((p) => sameId(p.user, userId));
     const from =
       c.type === 'direct' ? me?.clearedAt || new Date(0) : new Date(Math.max(+me?.joinedAt || 0, +me?.clearedAt || 0));
-    return { conversation: c._id, createdAt: { $gte: from } };
+    return { conversation: c._id, createdAt: { $gte: new Date(Math.max(+from, +historyFrom || 0)) } };
   });
 }
 
@@ -153,7 +153,7 @@ router.get(
     if (!conversations.length) return res.json({ items: [], hasMore: false });
 
     const base = {
-      $and: [{ $or: visibleIn(conversations, req.userId) }],
+      $and: [{ $or: visibleIn(conversations, req.userId, req.historyFrom) }],
       deletedForEveryone: false,
       deletedFor: { $ne: req.userId },
       $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: new Date() } }],
@@ -183,6 +183,7 @@ router.get(
     const mine = await Conversation.find({ 'participants.user': req.userId }, '_id').lean();
     const docs = await Message.find({
       conversation: { $in: mine.map((c) => c._id) },
+      ...(req.historyFrom && { createdAt: { $gte: req.historyFrom } }),
       type: 'call',
       deletedFor: { $ne: req.userId },
     })
@@ -199,7 +200,7 @@ router.get(
       Conversation.findOne({ _id: req.params.id, 'participants.user': req.userId })
     );
     if (!conv) throw new HttpError(404, 'Conversation not found');
-    res.json({ conversation: serializeConversation(conv, req.userId) });
+    res.json({ conversation: serializeConversation(conv, req.userId, { historyFrom: req.historyFrom }) });
   })
 );
 
@@ -513,10 +514,12 @@ router.get(
     const me = conv.member(req.userId);
     const limit = Math.min(Number(req.query.limit) || 40, 100);
     // Direct chats show full history; groups only from when you joined.
-    const from =
+    const chatFrom =
       conv.type === 'direct'
         ? me.clearedAt || new Date(0)
         : new Date(Math.max(+me.joinedAt || 0, +me.clearedAt || 0));
+    // A device that chose not to sync starts from when it signed in.
+    const from = new Date(Math.max(+chatFrom, +req.historyFrom || 0));
 
     const createdAt = { $gte: from };
     if (req.query.before) createdAt.$lt = new Date(String(req.query.before));
@@ -632,7 +635,7 @@ router.get(
       type: { $ne: 'system' },
       deletedForEveryone: false,
       deletedFor: { $ne: req.userId },
-      createdAt: { $gte: me.clearedAt || new Date(0) },
+      createdAt: { $gte: new Date(Math.max(+me.clearedAt || 0, +req.historyFrom || 0)) },
       text: new RegExp(escapeRegex(q), 'i'),
     })
       .sort({ createdAt: -1 })

@@ -25,7 +25,11 @@ const router = Router();
 router.get(
   '/starred',
   handle(async (req, res) => {
-    const docs = await Message.find({ starredBy: req.userId, deletedForEveryone: false })
+    const docs = await Message.find({
+      starredBy: req.userId,
+      deletedForEveryone: false,
+      ...(req.historyFrom && { createdAt: { $gte: req.historyFrom } }),
+    })
       .sort({ createdAt: -1 })
       .limit(200)
       .populate(REPLY_POPULATE);

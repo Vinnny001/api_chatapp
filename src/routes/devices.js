@@ -17,6 +17,27 @@ router.get(
   })
 );
 
+/**
+ * This device: sync with my other devices or not. Not syncing (chosen on a new device) means
+ * it only sees messages from when it signed in; turning sync on later shows everything again
+ * (and the device then asks my other devices for the encrypted history).
+ */
+router.patch(
+  '/me',
+  handle(async (req, res) => {
+    if (!req.deviceId) throw new HttpError(400, 'Update the app first');
+    const { sync } = z.object({ sync: z.boolean() }).parse(req.body);
+    const device = await Device.findById(req.deviceId);
+    const everSynced = device.sync === true;
+    device.sync = sync;
+    if (sync) device.historyFrom = undefined;
+    // Only a device that never synced starts from its sign-in (what's already here stays).
+    else if (!everSynced && !device.historyFrom) device.historyFrom = device.createdAt;
+    await device.save();
+    res.json({ device: deviceView(device, req.deviceId) });
+  })
+);
+
 /** Sign a device out (this one too: that's "Sign out"). */
 router.delete(
   '/:id',

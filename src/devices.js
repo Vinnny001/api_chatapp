@@ -11,6 +11,7 @@ export function deviceView(d, currentId) {
     name: d.name,
     platform: d.platform,
     approvedBy: d.approvedBy,
+    sync: d.sync ?? null, // null: not decided yet
     createdAt: d.createdAt,
     lastActiveAt: d.lastActiveAt,
     current: String(d._id) === String(currentId),

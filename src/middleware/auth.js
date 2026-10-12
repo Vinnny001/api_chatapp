@@ -13,6 +13,7 @@ export async function requireAuth(req, _res, next) {
     if (!session) return next(new HttpError(401, 'Not signed in'));
     req.userId = session.userId;
     req.deviceId = session.deviceId;
+    req.historyFrom = session.historyFrom; // set on a device that chose not to sync
     next();
   } catch (err) {
     next(err);

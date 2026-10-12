@@ -148,11 +148,12 @@ export function serializeReaction(r) {
   return { user: idOf(r.user), emoji: r.emoji, messageId: idOf(r.message), preview: r.preview || '', at: r.at };
 }
 
-export function serializeConversation(c, viewerId) {
+export function serializeConversation(c, viewerId, { historyFrom = null } = {}) {
   const me = c.participants.find((p) => sameId(p.user, viewerId));
   const viewerHidesLastSeen = me?.user?.settings?.showLastSeen === false;
   const last = c.lastMessage && !isObjectId(c.lastMessage) ? c.lastMessage : null;
-  const since = me ? Math.max(+me.joinedAt || 0, +me.clearedAt || 0) : 0;
+  // (A device that chose not to sync shows nothing from before it signed in.)
+  const since = me ? Math.max(+me.joinedAt || 0, +me.clearedAt || 0, +historyFrom || 0) : 0;
   const lastVisible =
     last && +last.createdAt >= since && !(last.deletedFor || []).some((u) => sameId(u, viewerId));
 
