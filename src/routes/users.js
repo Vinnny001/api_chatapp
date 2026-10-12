@@ -251,12 +251,17 @@ router.post(
   '/:id/report',
   handle(async (req, res) => {
     const reportedId = objectId.parse(req.params.id);
-    const { reason, details, conversationId, block } = z
+    const { reason, details, conversationId, block, evidence } = z
       .object({
         reason: z.enum(REPORT_REASONS).default('other'),
         details: z.string().trim().max(500).optional(),
         conversationId: objectId.optional(),
         block: z.boolean().default(false),
+        // End-to-end encrypted messages: only the reporter's device can read them.
+        evidence: z
+          .array(z.object({ id: objectId, type: z.string().max(20), text: z.string().max(2000).default('') }))
+          .max(5)
+          .default([]),
       })
       .parse(req.body || {});
     if (reportedId === req.userId) throw new HttpError(400, 'You can not report yourself');
@@ -265,7 +270,14 @@ router.post(
     if (conversationId && (await Conversation.exists({ _id: conversationId, 'participants.user': { $all: [req.userId, reportedId] } }))) {
       messages = (await Message.find({ conversation: conversationId, sender: reportedId }).sort({ createdAt: -1 }).limit(5).lean())
         .reverse()
-        .map((m) => ({ type: m.type, text: m.text || '', mediaUrl: m.media?.url || null, at: m.createdAt }));
+        .map((m) => {
+          if (!m.e2ee?.ciphertext) return { type: m.type, text: m.text || '', mediaUrl: m.media?.url || null, at: m.createdAt };
+          // Only for real messages of theirs in this chat (the content itself can't be checked).
+          const seen = evidence.find((e) => e.id === String(m._id));
+          return seen
+            ? { type: seen.type, text: seen.text, at: m.createdAt, fromReporter: true }
+            : { type: 'encrypted', text: '', at: m.createdAt };
+        });
     }
     await Report.create({ reporter: req.userId, reported: reportedId, reason, details, conversation: conversationId, messages });
     if (block) await setBlocked(req.userId, reportedId, true);

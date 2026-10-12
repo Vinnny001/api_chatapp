@@ -11,7 +11,8 @@ const reportSchema = new mongoose.Schema(
     details: { type: String, maxlength: 500 },
     conversation: { type: ObjectId, ref: 'Conversation' },
     // Their last messages in that chat when the report was made.
-    messages: [{ _id: false, type: { type: String }, text: String, mediaUrl: String, at: Date }],
+    // Encrypted ones (fromReporter): as decrypted and sent by the reporter's app.
+    messages: [{ _id: false, type: { type: String }, text: String, mediaUrl: String, at: Date, fromReporter: Boolean }],
     status: { type: String, enum: ['open', 'dismissed', 'actioned'], default: 'open' },
     reviewedBy: { type: ObjectId, ref: 'User' },
     reviewedAt: Date,

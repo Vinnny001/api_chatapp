@@ -101,7 +101,7 @@ export function serializeMessage(m, viewerId) {
     mentions: (m.mentions || []).map(idOf),
     ...(m.e2ee?.ciphertext && !deleted && { e2ee: { ciphertext: m.e2ee.ciphertext, epoch: m.e2ee.epoch, device: idOf(m.e2ee.device) } }),
     ...(m.viewOnce && { viewOnce: true, openedBy: (m.openedBy || []).map(idOf) }),
-    ...(m.poll?.question && !deleted && { poll: serializePoll(m.poll) }),
+    ...(m.poll?.options?.length && !deleted && { poll: serializePoll(m.poll) }),
     deletedForEveryone: deleted,
     editedAt: m.editedAt ?? null,
     expiresAt: m.expiresAt ?? null,

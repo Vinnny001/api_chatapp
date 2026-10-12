@@ -37,6 +37,7 @@ export async function createMessage({
   viewOnce = false, // photos/videos only
   poll, // { question, options: [text], multiple }
   e2ee, // { ciphertext, epoch, device }: encrypted on the sender's device
+  pollMeta, // encrypted polls: { count, multiple } (the question and options are in the ciphertext)
   mentionIds = [], // who an encrypted message mentions (the server can't read it to find out)
   clientId,
   call,
@@ -65,7 +66,17 @@ export async function createMessage({
       replyTo,
       forwarded,
       call,
-      ...(viewOnce && (type === 'image' || type === 'video') && { viewOnce: true, openedBy: [] }),
+      ...(viewOnce && (type === 'image' || type === 'video' || (e2ee && media?.url)) && { viewOnce: true, openedBy: [] }),
+      // Encrypted poll: votes are counted by option number; what the options say is encrypted.
+      ...(e2ee &&
+        pollMeta && {
+          poll: {
+            question: '',
+            options: Array.from({ length: pollMeta.count }, (_, i) => ({ id: String(i), text: '' })),
+            multiple: !!pollMeta.multiple,
+            votes: [],
+          },
+        }),
       ...(type === 'poll' &&
         poll && {
           poll: {

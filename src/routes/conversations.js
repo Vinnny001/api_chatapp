@@ -557,6 +557,7 @@ const sendSchema = z
       .object({ ciphertext: z.string().min(16).max(400_000).regex(/^[A-Za-z0-9+/=]+$/), epoch: z.number().int().min(0) })
       .optional(),
     mentions: z.array(objectId).max(512).optional(), // encrypted messages say whom they mention
+    pollMeta: z.object({ count: z.number().int().min(2).max(12), multiple: z.boolean().optional() }).optional(),
     poll: z
       .object({
         question: z.string().trim().min(1, 'Ask a question').max(300),
@@ -567,8 +568,11 @@ const sendSchema = z
       .optional(),
   })
   .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 || !!d.e2ee : d.type === 'poll' ? !!d.poll : !!d.media), 'Message is empty')
-  .refine((d) => !d.e2ee || (d.type === 'text' && !d.text), 'Only text messages are encrypted for now')
-  .refine((d) => !d.viewOnce || d.type === 'image' || d.type === 'video', 'Only photos and videos can be view once');
+  // Encrypted messages go as "text" whatever they contain (the content and its kind are in the
+  // ciphertext). View-once keeps its file address here: the server hands it out once.
+  .refine((d) => !d.e2ee || (d.type === 'text' && !d.text && (!d.media || d.viewOnce)), 'Invalid encrypted message')
+  .refine((d) => !d.pollMeta || !!d.e2ee, 'Invalid poll')
+  .refine((d) => !d.viewOnce || d.type === 'image' || d.type === 'video' || (d.e2ee && d.media), 'Only photos and videos can be view once');
 
 /**
  * Send over plain HTTP. The app normally sends through the realtime socket; this is used
@@ -586,7 +590,7 @@ router.post(
       data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conv._id })) ? data.replyTo : null;
     const block = await blockStatus(conv, req.userId);
     if (block.iBlocked) throw new HttpError(403, 'You blocked this contact. Unblock them to send a message.');
-    if (conv.mls?.enabled && data.type === 'text' && !data.e2ee) {
+    if (conv.mls?.enabled && !data.e2ee) {
       throw new HttpError(409, 'This chat is end-to-end encrypted. Update ChatApp to send messages here.');
     }
     if (data.e2ee && !req.deviceId) throw new HttpError(400, 'Update ChatApp to send encrypted messages.');
@@ -600,6 +604,7 @@ router.post(
       forwarded: data.forwarded,
       viewOnce: data.viewOnce,
       poll: data.poll,
+      pollMeta: data.pollMeta,
       ...(data.e2ee && { e2ee: { ...data.e2ee, device: req.deviceId }, mentionIds: data.mentions || [] }),
       clientId: data.clientId,
       hiddenFrom: block.blockedMe ? [block.peerId] : [], // they blocked me: never reaches them

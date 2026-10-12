@@ -85,7 +85,7 @@ router.post(
     const { options } = z.object({ options: z.array(z.string().max(4)).max(12) }).parse(req.body);
     const message = await Message.findById(req.params.id);
     const conv = message && (await findConversationForUser(message.conversation, req.userId));
-    if (!conv || message.type !== 'poll' || message.deletedForEveryone) throw new HttpError(404, 'Poll not found');
+    if (!conv || !message.poll?.options?.length || message.deletedForEveryone) throw new HttpError(404, 'Poll not found');
     const valid = new Set(message.poll.options.map((o) => o.id));
     const picked = [...new Set(options)].filter((o) => valid.has(o));
     if (!message.poll.multiple && picked.length > 1) throw new HttpError(400, 'Pick one option');
