@@ -133,7 +133,14 @@ export function messagePreview(message) {
 /** A group call in progress (the LiveKit room name stays on the server). */
 export function serializeGroupCall(g) {
   if (!g?.id) return null;
-  return { id: g.id, kind: g.kind, startedBy: idOf(g.startedBy), startedAt: g.startedAt, joined: (g.joined || []).map(idOf) };
+  return {
+    id: g.id,
+    kind: g.kind,
+    startedBy: idOf(g.startedBy),
+    startedAt: g.startedAt,
+    joined: (g.joined || []).map(idOf),
+    keys: (g.keys || []).map((k) => ({ ciphertext: k.ciphertext, epoch: k.epoch, device: idOf(k.device) })),
+  };
 }
 
 export function serializeReaction(r) {

@@ -67,6 +67,8 @@ const conversationSchema = new mongoose.Schema(
         startedBy: { type: ObjectId, ref: 'User' },
         startedAt: Date,
         joined: [{ type: ObjectId, ref: 'User' }], // everyone who joined at some point
+        // End-to-end encrypted calls: the call's media key, encrypted for the group (MLS).
+        keys: { type: [{ _id: false, ciphertext: String, epoch: Number, device: ObjectId }], default: undefined },
       },
       default: null,
     },

@@ -31,6 +31,7 @@ export const EVENTS = {
   MLS_WELCOME: 'mls:welcome', // this device was added to a chat's encryption group
   MLS_ROSTER: 'mls:roster', // a member's devices changed (re-check the group before sending)
   MLS_SYNC: 'mls:sync', // a message on the encrypted channel between my own devices
+  GROUP_CALL_KEY_REQUEST: 'groupcall:key-request', // someone in the call needs its key again
   CALL_INCOMING: 'call:incoming',
   CALL_ACCEPTED: 'call:accepted',
   CALL_REJECTED: 'call:rejected',

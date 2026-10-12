@@ -130,7 +130,8 @@ router.post(
 
     const me = await User.findById(req.userId, 'username phone avatarUrl').lean();
     const token = new AccessToken(lk.apiKey, lk.apiSecret, {
-      identity: req.userId,
+      // One identity per device ("userId:deviceId"): two devices of one person can both be in it.
+      identity: `${req.userId}:${req.deviceId || 'legacy'}`,
       name: userLabel(me),
       ttl: '3h',
       metadata: JSON.stringify({ avatarUrl: me?.avatarUrl || null }),
@@ -140,13 +141,58 @@ router.post(
   })
 );
 
+/** The group's call in progress (with its encrypted media keys), or null. */
+router.get(
+  '/:id/group-call',
+  handle(async (req, res) => {
+    const conv = await findConversationForUser(req.params.id, req.userId);
+    if (!conv) throw new HttpError(404, 'Conversation not found');
+    res.json({ groupCall: serializeGroupCall(conv.groupCall) });
+  })
+);
+
+/**
+ * End-to-end encrypted group call: a participant shares the call's media key, encrypted for
+ * the group with MLS (the server, and LiveKit, never see it).
+ */
+router.post(
+  '/:id/group-call/key',
+  handle(async (req, res) => {
+    if (!req.deviceId) throw new HttpError(400, 'Update ChatApp to join encrypted calls');
+    const { callId, ciphertext, epoch } = z
+      .object({ callId: z.string().min(8).max(64), ciphertext: z.string().min(16).max(20_000).regex(/^[A-Za-z0-9+/=]+$/), epoch: z.number().int().min(0) })
+      .parse(req.body);
+    const conv = await findConversationForUser(req.params.id, req.userId);
+    if (!conv || conv.groupCall?.id !== callId) throw new HttpError(404, 'Call not found');
+    await Conversation.updateOne(
+      { _id: conv._id, 'groupCall.id': callId },
+      { $push: { 'groupCall.keys': { $each: [{ ciphertext, epoch, device: req.deviceId }], $slice: -10 } } }
+    );
+    announce(await Conversation.findById(conv._id));
+    res.json({ ok: true });
+  })
+);
+
+/** I can't read any of the shared keys (I joined the group later): ask those in the call to share it again. */
+router.post(
+  '/:id/group-call/key-request',
+  handle(async (req, res) => {
+    const { callId } = z.object({ callId: z.string().min(8).max(64) }).parse(req.body);
+    const conv = await findConversationForUser(req.params.id, req.userId);
+    if (!conv || conv.groupCall?.id !== callId) throw new HttpError(404, 'Call not found');
+    emitToConversations([idOf(conv)], EVENTS.GROUP_CALL_KEY_REQUEST, { conversationId: idOf(conv), callId });
+    res.json({ ok: true });
+  })
+);
+
 /** I left the call: if nobody else is still in it, it ends. */
 router.post(
   '/:id/group-call/leave',
   handle(async (req, res) => {
     const conv = await findConversationForUser(req.params.id, req.userId);
     if (!conv?.groupCall?.id) return res.json({ ended: true });
-    const others = (await inRoom(conv.groupCall.room)).filter((p) => p.identity !== req.userId);
+    // Everyone else still in it (another device of mine counts: the call goes on there).
+    const others = (await inRoom(conv.groupCall.room)).filter((p) => p.identity !== `${req.userId}:${req.deviceId || 'legacy'}`);
     if (others.length) return res.json({ ended: false });
     await endGroupCall(conv._id);
     res.json({ ended: true });
