@@ -35,6 +35,22 @@ const conversationSchema = new mongoose.Schema(
     avatarUrl: { type: String, default: null },
     createdBy: { type: ObjectId, ref: 'User' },
     onlyAdminsCanSend: { type: Boolean, default: false },
+    // Group settings (as on WhatsApp): who may change the name, photo, description and timer,
+    // and who may add people. Missing on older groups: admins.
+    permissions: {
+      type: {
+        _id: false,
+        editInfo: { type: String, enum: ['all', 'admins'], default: 'admins' },
+        addMembers: { type: String, enum: ['all', 'admins'], default: 'admins' },
+      },
+      default: undefined,
+    },
+    // Joining by invite link needs an admin's approval; the people waiting.
+    approveJoins: { type: Boolean, default: false },
+    joinRequests: {
+      type: [{ _id: false, user: { type: ObjectId, ref: 'User' }, at: { type: Date, default: Date.now } }],
+      default: undefined,
+    },
     disappearingSeconds: { type: Number, default: 0 },
     // End-to-end encryption (MLS). The server only orders key changes (one commit per epoch)
     // and keeps the public group info new devices join with; it never has any keys.

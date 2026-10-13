@@ -21,6 +21,7 @@ const updateSchema = z.object({
       showLastSeen: z.boolean().optional(),
       showPhone: z.boolean().optional(),
       showEmail: z.boolean().optional(),
+      shareGroupActivity: z.boolean().optional(),
     })
     .optional(),
 });
@@ -138,7 +139,7 @@ router.patch(
       }
       user.username = data.username;
     }
-    for (const key of ['showLastSeen', 'showPhone', 'showEmail']) {
+    for (const key of ['showLastSeen', 'showPhone', 'showEmail', 'shareGroupActivity']) {
       if (data.settings?.[key] !== undefined) user.settings[key] = data.settings[key];
     }
     await user.save();

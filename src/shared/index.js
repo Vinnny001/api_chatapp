@@ -17,6 +17,7 @@ export {
   pushCallEnded,
   pushGroupCall,
   pushIncomingCall,
+  pushJoinRequest,
   pushLoginRequest,
   pushLoginRequestDone,
   pushNewMessage,

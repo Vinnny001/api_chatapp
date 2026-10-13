@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Conversation, User, createSystemMessage, serializeConversation, userLabel, withConversationRefs } from '#shared';
+import { Conversation, User, createSystemMessage, pushJoinRequest, serializeConversation, userLabel, withConversationRefs } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
 import { broadcastConversation, broadcastMessage } from '../realtime.js';
 
@@ -12,6 +12,18 @@ async function groupFor(code) {
 }
 
 const router = Router();
+
+/** Cancel my request to join. */
+router.delete(
+  '/:code/join',
+  handle(async (req, res) => {
+    const conv = await groupFor(req.params.code);
+    if (!conv) throw new HttpError(404, 'This invite link is no longer valid');
+    const pulled = await Conversation.updateOne({ _id: conv._id }, { $pull: { joinRequests: { user: req.userId } } });
+    if (pulled.modifiedCount) await broadcastConversation(conv._id);
+    res.json({ ok: true });
+  })
+);
 
 /** What the link leads to (before joining): name, photo, description, member count. */
 router.get(
@@ -26,8 +38,10 @@ router.get(
         description: conv.description || '',
         avatarUrl: conv.avatarUrl || null,
         members: conv.participants.length,
+        approveJoins: !!conv.approveJoins,
       },
       member: !!conv.member(req.userId),
+      requested: (conv.joinRequests || []).some((r) => String(r.user) === String(req.userId)),
     });
   })
 );
@@ -37,6 +51,19 @@ router.post(
   handle(async (req, res) => {
     const conv = await groupFor(req.params.code);
     if (!conv) throw new HttpError(404, 'This invite link is no longer valid');
+    if (!conv.member(req.userId) && conv.approveJoins) {
+      // An admin has to let them in: ask (once), and tell the admins.
+      const asked = await Conversation.updateOne(
+        { _id: conv._id, 'joinRequests.user': { $ne: req.userId } },
+        { $push: { joinRequests: { user: req.userId, at: new Date() } } }
+      );
+      if (asked.modifiedCount) {
+        await broadcastConversation(conv._id);
+        const me = await User.findById(req.userId, 'username phone').lean();
+        pushJoinRequest(conv, userLabel(me));
+      }
+      return res.status(202).json({ requested: true });
+    }
     if (!conv.member(req.userId)) {
       if (conv.participants.length >= MAX_GROUP_SIZE) throw new HttpError(400, 'This group is full');
       const now = new Date();

@@ -35,7 +35,7 @@ export function publicUser(u, { self = false, hideLastSeen = false } = {}) {
     out.name = u.name;
     out.emailVerified = u.emailVerified !== false;
     out.gender = u.gender;
-    out.settings = { showLastSeen, showPhone, showEmail };
+    out.settings = { showLastSeen, showPhone, showEmail, shareGroupActivity: u.settings?.shareGroupActivity !== false };
   }
   return out;
 }
@@ -148,6 +148,11 @@ export function serializeReaction(r) {
   return { user: idOf(r.user), emoji: r.emoji, messageId: idOf(r.message), preview: r.preview || '', at: r.at };
 }
 
+/** Who may edit a group's info and add people ('all' | 'admins'). */
+export function groupPermissions(c) {
+  return { editInfo: c.permissions?.editInfo || 'admins', addMembers: c.permissions?.addMembers || 'admins' };
+}
+
 export function serializeConversation(c, viewerId, { historyFrom = null } = {}) {
   const me = c.participants.find((p) => sameId(p.user, viewerId));
   const viewerHidesLastSeen = me?.user?.settings?.showLastSeen === false;
@@ -165,6 +170,10 @@ export function serializeConversation(c, viewerId, { historyFrom = null } = {}) 
     avatarUrl: c.avatarUrl ?? null,
     createdBy: idOf(c.createdBy),
     onlyAdminsCanSend: !!c.onlyAdminsCanSend,
+    permissions: groupPermissions(c),
+    approveJoins: !!c.approveJoins,
+    // Only admins see that people are waiting to join.
+    ...(me?.role === 'admin' && c.type === 'group' && { pendingJoins: (c.joinRequests || []).length }),
     disappearingSeconds: c.disappearingSeconds || 0,
     e2ee: !!c.mls?.enabled,
     lastReaction: serializeReaction(c.lastReaction),

@@ -64,6 +64,12 @@ export const pushLoginRequestDone = safely(async (userId, requestId) => {
   await pushData([idOf(userId)], { type: 'login_request_done', requestId }, { ttlSeconds: 600 });
 });
 
+/** Someone asked to join a group by its invite link: tell its admins' phones. */
+export const pushJoinRequest = safely(async (conversation, requesterName) => {
+  const admins = conversation.participants.filter((p) => p.role === 'admin').map((p) => idOf(p.user));
+  await pushData(admins, { type: 'join_request', conversationId: idOf(conversation), groupName: conversation.name, requesterName }, { ttlSeconds: 7 * 24 * 3600 });
+});
+
 /** New message → the other members' phones (not muted chats, not the sender). */
 export const pushNewMessage = safely(async (message, conversation) => {
   if (message.type === 'system' || message.type === 'call') return;

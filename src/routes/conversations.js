@@ -17,9 +17,12 @@ import {
   pushRead,
   escapeRegex,
   findConversationForUser,
+  groupPermissions,
+  publicUser,
   sameId,
   serializeConversation,
   serializeMessage,
+  USER_FIELDS,
   userLabel,
   withConversationRefs,
 } from '#shared';
@@ -50,6 +53,9 @@ const settingsSchema = z.object({
   description: z.string().trim().max(500).optional(),
   avatarUrl: uploadUrl.nullable().optional(),
   onlyAdminsCanSend: z.boolean().optional(),
+  editInfo: z.enum(['all', 'admins']).optional(),
+  addMembers: z.enum(['all', 'admins']).optional(),
+  approveJoins: z.boolean().optional(),
   disappearingSeconds: z
     .number()
     .int()
@@ -269,11 +275,14 @@ router.patch(
     const [actor] = await names([req.userId]);
     const notes = [];
 
-    const groupFields = ['name', 'description', 'avatarUrl', 'onlyAdminsCanSend'].filter(
-      (k) => data[k] !== undefined
-    );
-    if (groupFields.length) requireGroupAdmin(conv, req.userId);
-    if (data.disappearingSeconds !== undefined && conv.type === 'group') requireGroupAdmin(conv, req.userId);
+    // Name, photo, description and timer: admins, or everyone when the group allows it.
+    // The group's settings themselves: admins only.
+    const infoFields = ['name', 'description', 'avatarUrl'].filter((k) => data[k] !== undefined);
+    const settingFields = ['onlyAdminsCanSend', 'editInfo', 'addMembers', 'approveJoins'].filter((k) => data[k] !== undefined);
+    const everyoneEdits = conv.type === 'group' && groupPermissions(conv).editInfo === 'all';
+    if (infoFields.length && !everyoneEdits) requireGroupAdmin(conv, req.userId);
+    if (data.disappearingSeconds !== undefined && conv.type === 'group' && !everyoneEdits) requireGroupAdmin(conv, req.userId);
+    if (settingFields.length) requireGroupAdmin(conv, req.userId);
 
     if (data.name !== undefined && data.name !== conv.name) {
       conv.name = data.name;
@@ -293,6 +302,31 @@ router.patch(
         data.onlyAdminsCanSend
           ? `${actor} changed settings so only admins can send messages`
           : `${actor} changed settings so all members can send messages`
+      );
+    }
+    const perms = groupPermissions(conv);
+    if (data.editInfo !== undefined && data.editInfo !== perms.editInfo) {
+      conv.permissions = { ...perms, editInfo: data.editInfo };
+      notes.push(
+        data.editInfo === 'all'
+          ? `${actor} changed this group's settings to allow all members to edit this group's info`
+          : `${actor} changed this group's settings to allow only admins to edit this group's info`
+      );
+    }
+    if (data.addMembers !== undefined && data.addMembers !== perms.addMembers) {
+      conv.permissions = { ...groupPermissions(conv), addMembers: data.addMembers };
+      notes.push(
+        data.addMembers === 'all'
+          ? `${actor} changed this group's settings to allow all members to add others`
+          : `${actor} changed this group's settings to allow only admins to add others`
+      );
+    }
+    if (data.approveJoins !== undefined && data.approveJoins !== !!conv.approveJoins) {
+      conv.approveJoins = data.approveJoins;
+      notes.push(
+        data.approveJoins
+          ? `${actor} turned on admin approval to join this group`
+          : `${actor} turned off admin approval to join this group`
       );
     }
     if (data.disappearingSeconds !== undefined && data.disappearingSeconds !== conv.disappearingSeconds) {
@@ -431,7 +465,7 @@ router.post(
   handle(async (req, res) => {
     const { userIds } = z.object({ userIds: z.array(objectId).min(1).max(100) }).parse(req.body);
     const conv = await loadForUser(req);
-    requireGroupAdmin(conv, req.userId);
+    if (conv.type !== 'group' || groupPermissions(conv).addMembers !== 'all') requireGroupAdmin(conv, req.userId);
 
     const newIds = [...new Set(userIds)].filter((id) => !conv.member(id));
     if (!newIds.length) throw new HttpError(400, 'Those users are already members');
@@ -444,6 +478,8 @@ router.post(
     conv.participants.push(
       ...newIds.map((id) => ({ user: id, joinedAt: now, lastReadAt: now, lastDeliveredAt: now }))
     );
+    // Added directly: no longer waiting to join.
+    if (conv.joinRequests?.length) conv.joinRequests = conv.joinRequests.filter((r) => !newIds.includes(String(r.user)));
     await conv.save();
 
     const [actor, ...added] = await names([req.userId, ...newIds]);
@@ -504,6 +540,167 @@ router.delete(
       await broadcastConversation(conv._id);
     }
     res.json({ ok: true });
+  })
+);
+
+// ---- Joining with admin approval
+
+/** How a person appears to this admin: only what they allow (phone, email, last seen). */
+async function viewerHidesLastSeen(userId) {
+  return (await User.findById(userId, 'settings').lean())?.settings?.showLastSeen === false;
+}
+
+/** People asking to join by invite link (admins). */
+router.get(
+  '/:id/join-requests',
+  handle(async (req, res) => {
+    const conv = await loadForUser(req);
+    requireGroupAdmin(conv, req.userId);
+    const list = conv.joinRequests || [];
+    const users = await User.find({ _id: { $in: list.map((r) => r.user) } }, USER_FIELDS).lean();
+    const byId = new Map(users.map((u) => [String(u._id), u]));
+    const hideLastSeen = await viewerHidesLastSeen(req.userId);
+    res.json({
+      requests: list
+        .filter((r) => byId.has(String(r.user)))
+        .map((r) => ({ ...publicUser(byId.get(String(r.user)), { hideLastSeen }), requestedAt: r.at })),
+    });
+  })
+);
+
+/** Let someone in, or not. */
+router.post(
+  '/:id/join-requests/:userId',
+  handle(async (req, res) => {
+    const { approve } = z.object({ approve: z.boolean() }).parse(req.body);
+    const conv = await loadForUser(req);
+    requireGroupAdmin(conv, req.userId);
+    const targetId = req.params.userId;
+    if (!mongoose.isValidObjectId(targetId)) throw new HttpError(404, 'Request not found');
+    // Atomic: two admins answering at once can't both act on it.
+    const taken = await Conversation.updateOne({ _id: conv._id, 'joinRequests.user': targetId }, { $pull: { joinRequests: { user: targetId } } });
+    if (!taken.modifiedCount) throw new HttpError(410, 'This request was already answered');
+    if (approve) {
+      const fresh = await Conversation.findById(conv._id);
+      if (fresh.participants.length >= MAX_GROUP_SIZE) throw new HttpError(400, 'Group is full');
+      const now = new Date();
+      const added = await Conversation.updateOne(
+        { _id: conv._id, 'participants.user': { $ne: targetId } },
+        { $push: { participants: { user: targetId, joinedAt: now, lastReadAt: now, lastDeliveredAt: now } } }
+      );
+      if (added.modifiedCount) {
+        const [actor, joined] = await names([req.userId, targetId]);
+        await postSystem(await Conversation.findById(conv._id), `${actor} approved ${joined} to join`);
+        await broadcastConversation(conv._id, { join: [targetId] });
+        return res.json({ ok: true });
+      }
+    }
+    await broadcastConversation(conv._id); // admins' pending count
+    res.json({ ok: true });
+  })
+);
+
+// ---- Group dashboard (admins): activity from message metadata only
+
+const insightsQuery = z.object({
+  days: z.coerce.number().int().refine((d) => [7, 30, 90].includes(d), 'Pick 7, 30 or 90 days').default(30),
+  // The viewer's Date#getTimezoneOffset(), so days and hours are theirs.
+  tz: z.coerce.number().int().min(-840).max(840).default(0),
+});
+
+/**
+ * Counts per day, per hour of the day and per member. Encrypted messages count like any other:
+ * the server knows who sent a message and when, never what it says. Members appear as they
+ * allow (phone, email, last seen), and someone who turned off "Share my activity in group
+ * insights" shows no per-person numbers (they still count in the group's totals).
+ */
+router.get(
+  '/:id/insights',
+  handle(async (req, res) => {
+    const { days, tz } = insightsQuery.parse(req.query);
+    const conv = await loadForUser(req);
+    requireGroupAdmin(conv, req.userId);
+
+    const offset = -tz; // minutes ahead of UTC
+    const timezone = `${offset < 0 ? '-' : '+'}${String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0')}:${String(Math.abs(offset) % 60).padStart(2, '0')}`;
+    const local = new Date(Date.now() + offset * 60000);
+    const todayStart = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+    const since = new Date(todayStart - (days - 1) * 86400000 - offset * 60000);
+
+    const inRange = { createdAt: { $gte: since } };
+    const [agg] = await Message.aggregate([
+      { $match: { conversation: conv._id, type: { $nin: ['system', 'call'] }, sender: { $ne: null } } },
+      {
+        $facet: {
+          total: [{ $count: 'n' }],
+          perSender: [
+            {
+              $group: {
+                _id: '$sender',
+                total: { $sum: 1 },
+                inRange: { $sum: { $cond: [{ $gte: ['$createdAt', since] }, 1, 0] } },
+                last: { $max: '$createdAt' },
+              },
+            },
+          ],
+          daily: [{ $match: inRange }, { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone } }, n: { $sum: 1 } } }],
+          hours: [{ $match: inRange }, { $group: { _id: { $hour: { date: '$createdAt', timezone } }, n: { $sum: 1 } } }],
+        },
+      },
+    ]);
+
+    const dayCounts = new Map(agg.daily.map((d) => [d._id, d.n]));
+    const daily = [];
+    for (let i = 0; i < days; i++) {
+      const date = new Date(todayStart - (days - 1 - i) * 86400000).toISOString().slice(0, 10);
+      daily.push({ date, count: dayCounts.get(date) || 0 });
+    }
+    const hours = Array.from({ length: 24 }, (_, h) => agg.hours.find((x) => x._id === h)?.n || 0);
+
+    const stats = new Map(agg.perSender.map((s) => [String(s._id), s]));
+    const users = await User.find({ _id: { $in: conv.participants.map((p) => p.user) } }, USER_FIELDS).lean();
+    const byId = new Map(users.map((u) => [String(u._id), u]));
+    const hideLastSeen = await viewerHidesLastSeen(req.userId);
+    const members = conv.participants.map((p) => {
+      const id = String(p.user);
+      const u = byId.get(id);
+      const isMe = id === req.userId;
+      const blockedMe = (u?.blocked || []).some((b) => sameId(b, req.userId));
+      const shares = isMe || u?.settings?.shareGroupActivity !== false;
+      const s = stats.get(id);
+      const pub = publicUser(u, { hideLastSeen: hideLastSeen && !isMe }) || { id };
+      return {
+        id,
+        username: pub.username ?? null,
+        avatarUrl: blockedMe ? null : pub.avatarUrl ?? null,
+        lastSeen: blockedMe ? null : pub.lastSeen ?? null,
+        ...(pub.phone && { phone: pub.phone }),
+        ...((pub.email || (isMe && u?.email)) && { email: pub.email || u.email }),
+        role: p.role,
+        joinedAt: p.joinedAt,
+        activityHidden: !shares,
+        messages: shares ? s?.inRange || 0 : null,
+        total: shares ? s?.total || 0 : null,
+        lastMessageAt: shares ? s?.last || null : null,
+      };
+    });
+
+    res.json({
+      days,
+      since,
+      totals: {
+        members: conv.participants.length,
+        admins: conv.participants.filter((p) => p.role === 'admin').length,
+        messages: agg.total[0]?.n || 0,
+        messagesInRange: daily.reduce((n, d) => n + d.count, 0),
+        activeMembers: conv.participants.filter((p) => (stats.get(String(p.user))?.inRange || 0) > 0).length,
+        newMembers: conv.participants.filter((p) => p.joinedAt >= since).length,
+        pendingJoins: (conv.joinRequests || []).length,
+      },
+      daily,
+      hours,
+      members,
+    });
   })
 );
 

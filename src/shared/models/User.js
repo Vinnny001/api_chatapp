@@ -35,6 +35,8 @@ const userSchema = new mongoose.Schema(
       // Only matters with a username: without one, the phone number is how people see you.
       showPhone: { type: Boolean, default: false },
       showEmail: { type: Boolean, default: false },
+      // Group admins' dashboards show how many messages I sent and when I last posted.
+      shareGroupActivity: { type: Boolean, default: true },
     },
     // People this user saved in ChatApp (their own contact list, kept on every device).
     contacts: {
