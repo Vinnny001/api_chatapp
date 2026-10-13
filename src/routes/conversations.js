@@ -791,9 +791,8 @@ router.post(
       data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conv._id })) ? data.replyTo : null;
     const block = await blockStatus(conv, req.userId);
     if (block.iBlocked) throw new HttpError(403, 'You blocked this contact. Unblock them to send a message.');
-    if (conv.mls?.enabled && !data.e2ee) {
-      throw new HttpError(409, 'This chat is end-to-end encrypted. Update ChatApp to send messages here.');
-    }
+    // Every message is end-to-end encrypted: plaintext is refused (an old or tampered app).
+    if (!data.e2ee) throw new HttpError(409, 'Messages must be end-to-end encrypted. Update ChatApp to send messages.');
     if (data.e2ee && !req.deviceId) throw new HttpError(400, 'Update ChatApp to send encrypted messages.');
     const { message, duplicate } = await createMessage({
       conversation: conv,

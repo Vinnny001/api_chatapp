@@ -185,14 +185,18 @@ router.get(
   })
 );
 
-/** Turns encryption on for a chat (every member has an encryption-capable device). The caller then creates the group. */
+/**
+ * Turns encryption on for a chat. The caller then creates the group and adds every device it
+ * can; members without one yet get messages sent again once they have one (encryption is
+ * required, so nobody waits for them).
+ */
 router.post(
   '/:id/start',
   handle(async (req, res) => {
     needDevice(req);
     const conv = await memberConv(req);
     if (conv.mls?.enabled) throw new HttpError(409, 'Encryption is already on');
-    if (!(await rosterOf(conv)).ready) throw new HttpError(400, 'Not every member can use encryption yet');
+    if (!(await Device.exists({ _id: req.deviceId, mlsKey: { $exists: true } }))) throw new HttpError(400, 'Encryption isn’t set up on this device yet');
     const started = await Conversation.updateOne(
       { _id: conv._id, 'mls.enabled': { $ne: true } },
       { $set: { mls: { enabled: true, epoch: 0, startedBy: req.deviceId } } }
