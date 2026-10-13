@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Conversation, DEVICE_ACTIVE_MS, Device, EVENTS, findConversationForUser, sameId } from '#shared';
+import { Conversation, DEVICE_ACTIVE_MS, Device, EVENTS, Message, findConversationForUser, sameId } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
 import { KeyPackage, MlsCommit, MlsWelcome, SyncMessage } from '../models/Mls.js';
 import { broadcastConversation, emitToConversations, emitToDevices, emitToUser } from '../realtime.js';
@@ -33,6 +33,7 @@ export async function rosterOf(conv) {
     'user mlsKey'
   ).lean();
   return {
+    users: users.map(String),
     ready: users.every((u) => devices.some((d) => sameId(d.user, u))),
     devices: devices.map((d) => ({ userId: String(d.user), deviceId: String(d._id), key: d.mlsKey })),
   };
@@ -100,6 +101,8 @@ router.post(
     const have = await KeyPackage.countDocuments({ device: req.deviceId });
     const room = Math.max(0, MAX_KEY_PACKAGES - have);
     if (room) await KeyPackage.insertMany(packages.slice(0, room).map((p) => ({ device: req.deviceId, user: req.userId, keyId: p.id, data: p.data })));
+    // A device's first keys: others can add it now (e.g. to send it what it missed).
+    if (!have && packages.length) announceRoster(req.userId).catch(() => {});
     res.json({ count: have + Math.min(room, packages.length) });
   })
 );
@@ -233,6 +236,31 @@ router.post(
     }
     emitToConversations([conv._id], EVENTS.MLS_COMMIT, { conversationId: String(conv._id), epoch: epoch + 1, device: req.deviceId });
     res.status(201).json({ epoch: epoch + 1 });
+  })
+);
+
+const RESEND_WITHIN_MS = 30 * 24 * 3600 * 1000;
+
+/**
+ * A message encrypted when some member had no device (signed out everywhere): the device that
+ * sent it encrypts it again, now that they have one. Only that device, for its own message.
+ */
+router.post(
+  '/:id/messages/:mid/resend',
+  handle(async (req, res) => {
+    needDevice(req);
+    const { ciphertext, epoch } = z.object({ ciphertext: b64, epoch: z.number().int().min(0) }).parse(req.body);
+    const conv = await memberConv(req);
+    const message = mongoose.isValidObjectId(req.params.mid) ? await Message.findOne({ _id: req.params.mid, conversation: conv._id }) : null;
+    if (!message?.e2ee?.ciphertext || message.deletedForEveryone) throw new HttpError(404, 'Message not found');
+    if (!sameId(message.sender, req.userId) || String(message.e2ee.device) !== String(req.deviceId)) {
+      throw new HttpError(403, 'Only the device that sent this message can send it again');
+    }
+    if (Date.now() - message.createdAt > RESEND_WITHIN_MS) throw new HttpError(410, 'This message is too old to send again');
+    const e2ee = { ciphertext, epoch, device: req.deviceId };
+    await Message.updateOne({ _id: message._id }, { $set: { e2ee } });
+    emitToConversations([conv._id], EVENTS.MESSAGE_UPDATED, { id: String(message._id), conversationId: String(conv._id), e2ee });
+    res.json({ ok: true });
   })
 );
 
