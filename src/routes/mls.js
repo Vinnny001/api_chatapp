@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Conversation, DEVICE_ACTIVE_MS, Device, EVENTS, Message, findConversationForUser, sameId } from '#shared';
+import { Conversation, Device, EVENTS, Message, findConversationForUser, sameId } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
 import { KeyPackage, MlsCommit, MlsWelcome, SyncMessage } from '../models/Mls.js';
 import { broadcastConversation, emitToConversations, emitToDevices, emitToUser } from '../realtime.js';
@@ -23,15 +23,13 @@ function needDevice(req) {
 }
 
 /**
- * Who should be able to read a chat: every encryption-capable device of every member, used in
- * the last 30 days and not signed out. `ready` = every member has at least one such device.
+ * Who should be able to read a chat: every encryption-capable device of every member that isn't
+ * signed out, however long it has been away (it reads what it missed when it's back).
+ * `ready` = every member has at least one such device.
  */
 export async function rosterOf(conv) {
   const users = conv.participants.map((p) => p.user);
-  const devices = await Device.find(
-    { user: { $in: users }, revokedAt: null, mlsKey: { $exists: true }, lastActiveAt: { $gt: new Date(Date.now() - DEVICE_ACTIVE_MS) } },
-    'user mlsKey'
-  ).lean();
+  const devices = await Device.find({ user: { $in: users }, revokedAt: null, mlsKey: { $exists: true } }, 'user mlsKey').lean();
   return {
     users: users.map(String),
     ready: users.every((u) => devices.some((d) => sameId(d.user, u))),
@@ -97,13 +95,26 @@ router.post(
   '/key-packages',
   handle(async (req, res) => {
     needDevice(req);
-    const { packages } = z.object({ packages: z.array(z.object({ id: z.string().regex(/^[a-f0-9]{32}$/), data: b64 })).max(MAX_KEY_PACKAGES) }).parse(req.body);
-    const have = await KeyPackage.countDocuments({ device: req.deviceId });
+    const { packages } = z
+      .object({
+        packages: z
+          .array(z.object({ id: z.string().regex(/^(lr-[a-f0-9]{28}|[a-f0-9]{32})$/), data: b64, lastResort: z.boolean().optional() }))
+          .max(MAX_KEY_PACKAGES + 1),
+      })
+      .parse(req.body);
+    // At most one last resort KeyPackage per device: a new one replaces it.
+    const last = packages.find((p) => p.lastResort);
+    if (last) {
+      await KeyPackage.deleteMany({ device: req.deviceId, lastResort: true });
+      await KeyPackage.create({ device: req.deviceId, user: req.userId, keyId: last.id, data: last.data, lastResort: true });
+    }
+    const oneTime = packages.filter((p) => !p.lastResort);
+    const have = await KeyPackage.countDocuments({ device: req.deviceId, lastResort: { $ne: true } });
     const room = Math.max(0, MAX_KEY_PACKAGES - have);
-    if (room) await KeyPackage.insertMany(packages.slice(0, room).map((p) => ({ device: req.deviceId, user: req.userId, keyId: p.id, data: p.data })));
+    if (room && oneTime.length) await KeyPackage.insertMany(oneTime.slice(0, room).map((p) => ({ device: req.deviceId, user: req.userId, keyId: p.id, data: p.data })));
     // A device's first keys: others can add it now (e.g. to send it what it missed).
     if (!have && packages.length) announceRoster(req.userId).catch(() => {});
-    res.json({ count: have + Math.min(room, packages.length) });
+    res.json({ count: have + Math.min(room, oneTime.length) });
   })
 );
 
@@ -111,7 +122,10 @@ router.get(
   '/key-packages/count',
   handle(async (req, res) => {
     needDevice(req);
-    res.json({ count: await KeyPackage.countDocuments({ device: req.deviceId }) });
+    res.json({
+      count: await KeyPackage.countDocuments({ device: req.deviceId, lastResort: { $ne: true } }),
+      lastResort: !!(await KeyPackage.exists({ device: req.deviceId, lastResort: true })),
+    });
   })
 );
 
@@ -126,7 +140,10 @@ router.post(
     const packages = [];
     for (const deviceId of new Set(deviceIds)) {
       if (!allowed.has(deviceId)) continue;
-      const kp = await KeyPackage.findOneAndDelete({ device: deviceId }, { sort: { createdAt: 1 } }).lean();
+      // A one-time KeyPackage, else (all used up) the device's last resort one, which stays.
+      const kp =
+        (await KeyPackage.findOneAndDelete({ device: deviceId, lastResort: { $ne: true } }, { sort: { createdAt: 1 } }).lean()) ||
+        (await KeyPackage.findOne({ device: deviceId, lastResort: true }).lean());
       if (kp) packages.push({ deviceId, keyId: kp.keyId, data: kp.data });
     }
     res.json({ packages });

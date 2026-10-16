@@ -720,6 +720,21 @@ router.get(
 
     const createdAt = { $gte: from };
     if (req.query.before) createdAt.$lt = new Date(String(req.query.before));
+    // `after`: the messages that came after this time, oldest first (a device catching up).
+    const after = req.query.after && !req.query.before ? new Date(String(req.query.after)) : null;
+    if (after && !Number.isNaN(+after)) {
+      createdAt.$gt = after;
+      const docs = await Message.find({
+        conversation: conv._id,
+        createdAt,
+        deletedFor: { $ne: req.userId },
+        $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: new Date() } }],
+      })
+        .sort({ createdAt: 1 })
+        .limit(limit + 1)
+        .populate(REPLY_POPULATE);
+      return res.json({ messages: docs.slice(0, limit).map((m) => serializeMessage(m, req.userId)), hasMore: docs.length > limit });
+    }
 
     const docs = await Message.find({
       conversation: conv._id,
