@@ -19,6 +19,7 @@ import {
   findChatForUser,
   groupPermissions,
   publicUser,
+  recordReceipts,
   sameId,
   serializeConversation,
   serializeMessage,
@@ -385,6 +386,7 @@ router.post(
       { $set: { 'participants.$.lastDeliveredAt': at } }
     );
     if (result.modifiedCount) {
+      recordReceipts(conv._id, req.userId, at).catch(() => {});
       emitToConversations([String(conv._id)], EVENTS.RECEIPT, {
         conversationId: String(conv._id),
         userId: req.userId,
@@ -412,6 +414,7 @@ router.post(
         { $set: { [`participants.$.${field}`]: at } }
       );
     }
+    recordReceipts(conv._id, req.userId, at, { read: true }).catch(() => {});
     const unreadCount = await Message.countDocuments({
       conversation: conv._id,
       sender: { $ne: req.userId },

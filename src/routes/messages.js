@@ -114,6 +114,32 @@ router.post(
   })
 );
 
+/**
+ * Message info (only for its sender): when each recipient's device got it and when they read
+ * it. Older messages have no times recorded: then whether it was delivered / read comes from
+ * the chat's receipts.
+ */
+router.get(
+  '/:id/info',
+  handle(async (req, res) => {
+    const message = mongoose.isValidObjectId(req.params.id) ? await Message.findById(req.params.id, 'conversation sender createdAt receipts') : null;
+    const conv = message && (await findChatForUser(message.conversation, req.userId));
+    if (!conv) throw new HttpError(404, 'Message not found');
+    if (!sameId(message.sender, req.userId)) throw new HttpError(403, 'Only the sender can see this');
+    const receipts = new Map((message.receipts || []).map((r) => [String(r.user), r]));
+    const recipients = conv.participants
+      // (people who joined a group after it was sent never got it)
+      .filter((p) => !sameId(p.user, req.userId) && !(conv.type === 'group' && p.joinedAt > message.createdAt))
+      .map((p) => {
+        const r = receipts.get(String(p.user));
+        const read = !!r?.readAt || p.lastReadAt >= message.createdAt;
+        const delivered = read || !!r?.deliveredAt || p.lastDeliveredAt >= message.createdAt;
+        return { id: String(p.user), delivered, deliveredAt: r?.deliveredAt || null, read, readAt: r?.readAt || null };
+      });
+    res.json({ sentAt: message.createdAt, recipients });
+  })
+);
+
 const MAX_PINS = 3;
 
 /** Pin a message in its chat (up to 3; pinning a 4th unpins the oldest). */

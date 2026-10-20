@@ -66,6 +66,8 @@ const messageSchema = new mongoose.Schema(
     deletedForEveryone: { type: Boolean, default: false },
     editedAt: { type: Date, default: null },
     expiresAt: { type: Date, default: undefined },
+    // When each recipient's device got it and when they read it (message info).
+    receipts: { type: [{ _id: false, user: { type: ObjectId, ref: 'User' }, deliveredAt: Date, readAt: Date }], default: undefined },
     // End-to-end encrypted content: an MLS application message (base64) made in `epoch` by
     // the sender's `device`. The server can't read it; `text` stays empty.
     e2ee: {

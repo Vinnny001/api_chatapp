@@ -21,6 +21,32 @@ export function findChatForUser(conversationId, userId) {
   return Conversation.findOne({ _id: conversationId, 'participants.user': userId, type: { $in: ['direct', 'group'] } });
 }
 
+const RECEIPT_WINDOW_MS = 30 * 24 * 3600 * 1000;
+
+/**
+ * Per-message receipt times (message info): this member's device has the messages up to `at`
+ * (now, if not noted before), and with `read`, they read them now. Called when their delivered
+ * or read position moves forward.
+ */
+export async function recordReceipts(conversationId, userId, at, { read = false } = {}) {
+  const user = new mongoose.Types.ObjectId(String(userId));
+  const now = new Date();
+  const theirs = {
+    conversation: conversationId,
+    sender: { $nin: [null, user] },
+    type: { $nin: ['system', 'call'] },
+    createdAt: { $lte: at, $gte: new Date(+at - RECEIPT_WINDOW_MS) },
+  };
+  await Message.updateMany({ ...theirs, 'receipts.user': { $ne: user } }, { $push: { receipts: { user, deliveredAt: now, ...(read && { readAt: now }) } } });
+  if (read) {
+    await Message.updateMany(
+      { ...theirs, receipts: { $elemMatch: { user, readAt: null } } },
+      { $set: { 'receipts.$[r].readAt': now } },
+      { arrayFilters: [{ 'r.user': user, 'r.readAt': null }] }
+    );
+  }
+}
+
 export function canSend(conversation, userId) {
   const member = conversation.member(userId);
   if (!member) return false;

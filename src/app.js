@@ -13,6 +13,7 @@ import inviteRoutes, { invitePage } from './routes/invites.js';
 import deviceRoutes from './routes/devices.js';
 import mlsRoutes from './routes/mls.js';
 import statusRoutes from './routes/status.js';
+import supportRoutes from './routes/support.js';
 import { revokePage } from './routes/revokePage.js';
 import messageRoutes from './routes/messages.js';
 import uploadRoutes, { serveStoredFile, serveUploads } from './routes/uploads.js';
@@ -43,6 +44,7 @@ export function createApp() {
   app.use('/api/devices', requireAuth, deviceRoutes);
   app.use('/api/mls', requireAuth, mlsRoutes);
   app.use('/api/status', requireAuth, statusRoutes);
+  app.use('/api/support', requireAuth, supportRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
