@@ -20,6 +20,7 @@ export {
   pushJoinRequest,
   pushLoginRequest,
   pushLoginRequestDone,
+  pushMessageEdited,
   pushNewMessage,
   pushReaction,
   pushReactionRemoved,

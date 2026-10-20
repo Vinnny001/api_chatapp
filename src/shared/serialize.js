@@ -213,6 +213,7 @@ export function serializeConversation(c, viewerId, { historyFrom = null } = {}) 
           muted: !!me.muted,
           archived: !!me.archived,
           unreadCount: me.unreadCount || 0,
+          markedUnread: !!me.markedUnread,
           joinedAt: me.joinedAt,
           clearedAt: me.clearedAt ?? null,
         }

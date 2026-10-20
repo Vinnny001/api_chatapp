@@ -64,6 +64,7 @@ const settingsSchema = z.object({
 });
 
 const prefsSchema = z.object({
+  markedUnread: z.boolean().optional(), // "Mark as unread" / "Mark as read"
   pinned: z.boolean().optional(),
   muted: z.boolean().optional(),
   archived: z.boolean().optional(),
@@ -420,7 +421,7 @@ router.post(
     const unreadMentions = await Message.countDocuments({ conversation: conv._id, mentions: req.userId, createdAt: { $gt: at } });
     await Conversation.updateOne(
       { _id: conv._id, 'participants.user': req.userId },
-      { $set: { 'participants.$.unreadCount': unreadCount, 'participants.$.unreadMentions': unreadMentions } }
+      { $set: { 'participants.$.unreadCount': unreadCount, 'participants.$.unreadMentions': unreadMentions, 'participants.$.markedUnread': false } }
     );
     emitToConversations([String(conv._id)], EVENTS.RECEIPT, {
       conversationId: String(conv._id),

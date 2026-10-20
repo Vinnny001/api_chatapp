@@ -70,6 +70,36 @@ export const pushJoinRequest = safely(async (conversation, requesterName) => {
   await pushData(admins, { type: 'join_request', conversationId: idOf(conversation), groupName: conversation.name, requesterName }, { ttlSeconds: 7 * 24 * 3600 });
 });
 
+/**
+ * A message was edited: the other members' phones update its notification to the new text
+ * (decrypted there), or show it again if it was already read.
+ */
+export const pushMessageEdited = safely(async (message, conversation) => {
+  const senderId = idOf(message.sender);
+  const recipientIds = conversation.participants.filter((p) => idOf(p.user) !== senderId && !p.muted).map((p) => idOf(p.user));
+  if (!recipientIds.length) return;
+  const sender = await User.findById(senderId, 'username phone avatarUrl').lean();
+  const isGroup = conversation.type === 'group';
+  const label = userLabel(sender);
+  const data = {
+    type: 'message_edit',
+    conversationId: idOf(conversation),
+    messageId: idOf(message),
+    isGroup: isGroup ? '1' : '0',
+    chatTitle: isGroup ? conversation.name : label,
+    chatAvatar: isGroup ? conversation.avatarUrl : sender?.avatarUrl,
+    senderId,
+    senderName: label,
+    senderAvatar: sender?.avatarUrl,
+    text: '🔒 Edited message',
+    e2ee: message.e2ee?.ciphertext ? '1' : '0',
+    sentAt: new Date(message.createdAt).getTime(),
+  };
+  const full = JSON.stringify(serializeMessage(message));
+  if (Buffer.byteLength(JSON.stringify(data)) + Buffer.byteLength(full) < 3600) data.message = full;
+  await pushData(recipientIds, data);
+});
+
 /** New message → the other members' phones (not muted chats, not the sender). */
 export const pushNewMessage = safely(async (message, conversation) => {
   if (message.type === 'system' || message.type === 'call') return;

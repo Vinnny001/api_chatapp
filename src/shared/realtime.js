@@ -24,6 +24,7 @@ export const EVENTS = {
   PRESENCE: 'presence',
   CONVERSATION_UPSERT: 'conversation:upsert',
   CONVERSATION_REMOVED: 'conversation:removed',
+  CONVERSATION_MARKED: 'conversation:marked', // (to one member) the chat shows as unread again: { conversationId }
   USER_UPDATED: 'user:updated',
   LOGIN_REQUEST: 'login:request', // a new device asks to sign in (to the account's devices)
   LOGIN_REQUEST_DONE: 'login:request:done',

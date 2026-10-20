@@ -13,6 +13,9 @@ const participantSchema = new mongoose.Schema(
     lastReadAt: { type: Date, default: Date.now },
     unreadCount: { type: Number, default: 0 },
     unreadMentions: { type: Number, default: 0 }, // unread messages that @mention this member
+    // Shows as unread though every message was read: marked so by hand ("Mark as unread"), or
+    // a message already read was edited since. Reading the chat clears it.
+    markedUnread: { type: Boolean, default: false },
     pinned: { type: Boolean, default: false },
     muted: { type: Boolean, default: false },
     archived: { type: Boolean, default: false },
