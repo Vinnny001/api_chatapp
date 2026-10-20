@@ -16,6 +16,11 @@ export function findConversationForUser(conversationId, userId) {
   return Conversation.findOne({ _id: conversationId, 'participants.user': userId });
 }
 
+/** A chat of this user (one to one or group): never a hidden channel (own devices, status). */
+export function findChatForUser(conversationId, userId) {
+  return Conversation.findOne({ _id: conversationId, 'participants.user': userId, type: { $in: ['direct', 'group'] } });
+}
+
 export function canSend(conversation, userId) {
   const member = conversation.member(userId);
   if (!member) return false;
@@ -134,7 +139,7 @@ export async function createMessage({
  */
 export async function reactToMessage({ messageId, userId, emoji }) {
   const message = await Message.findById(messageId);
-  const conversation = message && (await findConversationForUser(message.conversation, userId));
+  const conversation = message && (await findChatForUser(message.conversation, userId));
   if (!conversation) throw Object.assign(new Error('Message not found'), { status: 404 });
   if (message.deletedForEveryone || message.type === 'system' || message.type === 'call') {
     throw Object.assign(new Error('You can’t react to this message'), { status: 400 });

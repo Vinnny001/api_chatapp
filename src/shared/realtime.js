@@ -32,6 +32,9 @@ export const EVENTS = {
   MLS_ROSTER: 'mls:roster', // a member's devices changed (re-check the group before sending)
   MLS_SYNC: 'mls:sync', // a message on the encrypted channel between my own devices
   GROUP_CALL_KEY_REQUEST: 'groupcall:key-request', // someone in the call needs its key again
+  STATUS_NEW: 'status:new', // someone I may see posted a status update: { userId, id }
+  STATUS_REMOVED: 'status:removed', // it was deleted: { userId, id }
+  STATUS_VIEW: 'status:view', // (to its author) someone viewed my status: { id, user, at }
   CALL_INCOMING: 'call:incoming',
   CALL_ACCEPTED: 'call:accepted',
   CALL_REJECTED: 'call:rejected',

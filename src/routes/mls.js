@@ -219,7 +219,7 @@ router.post(
       { $set: { mls: { enabled: true, epoch: 0, startedBy: req.deviceId } } }
     );
     if (!started.modifiedCount) throw new HttpError(409, 'Encryption is already on');
-    if (conv.type !== 'self') await broadcastConversation(conv._id); // every member's app now shows the chat as encrypted
+    if (conv.type === 'direct' || conv.type === 'group') await broadcastConversation(conv._id); // every member's app now shows the chat as encrypted
     res.json({ ok: true, epoch: 0 });
   })
 );

@@ -8,7 +8,7 @@ import {
   User,
   config,
   createMessage,
-  findConversationForUser,
+  findChatForUser,
   idOf,
   pushCallEnded,
   pushGroupCall,
@@ -93,7 +93,7 @@ router.post(
   handle(async (req, res) => {
     if (!enabled()) throw new HttpError(503, 'Group calls aren’t set up on the server yet');
     const { kind } = z.object({ kind: z.enum(['audio', 'video']).default('audio') }).parse(req.body || {});
-    let conv = await findConversationForUser(req.params.id, req.userId);
+    let conv = await findChatForUser(req.params.id, req.userId);
     if (!conv) throw new HttpError(404, 'Conversation not found');
     if (conv.type !== 'group') throw new HttpError(400, 'Group calls are for groups');
 
@@ -145,7 +145,7 @@ router.post(
 router.get(
   '/:id/group-call',
   handle(async (req, res) => {
-    const conv = await findConversationForUser(req.params.id, req.userId);
+    const conv = await findChatForUser(req.params.id, req.userId);
     if (!conv) throw new HttpError(404, 'Conversation not found');
     res.json({ groupCall: serializeGroupCall(conv.groupCall) });
   })
@@ -162,7 +162,7 @@ router.post(
     const { callId, ciphertext, epoch } = z
       .object({ callId: z.string().min(8).max(64), ciphertext: z.string().min(16).max(20_000).regex(/^[A-Za-z0-9+/=]+$/), epoch: z.number().int().min(0) })
       .parse(req.body);
-    const conv = await findConversationForUser(req.params.id, req.userId);
+    const conv = await findChatForUser(req.params.id, req.userId);
     if (!conv || conv.groupCall?.id !== callId) throw new HttpError(404, 'Call not found');
     await Conversation.updateOne(
       { _id: conv._id, 'groupCall.id': callId },
@@ -178,7 +178,7 @@ router.post(
   '/:id/group-call/key-request',
   handle(async (req, res) => {
     const { callId } = z.object({ callId: z.string().min(8).max(64) }).parse(req.body);
-    const conv = await findConversationForUser(req.params.id, req.userId);
+    const conv = await findChatForUser(req.params.id, req.userId);
     if (!conv || conv.groupCall?.id !== callId) throw new HttpError(404, 'Call not found');
     emitToConversations([idOf(conv)], EVENTS.GROUP_CALL_KEY_REQUEST, { conversationId: idOf(conv), callId });
     res.json({ ok: true });
@@ -189,7 +189,7 @@ router.post(
 router.post(
   '/:id/group-call/leave',
   handle(async (req, res) => {
-    const conv = await findConversationForUser(req.params.id, req.userId);
+    const conv = await findChatForUser(req.params.id, req.userId);
     if (!conv?.groupCall?.id) return res.json({ ended: true });
     // Everyone else still in it (another device of mine counts: the call goes on there).
     const others = (await inRoom(conv.groupCall.room)).filter((p) => p.identity !== `${req.userId}:${req.deviceId || 'legacy'}`);

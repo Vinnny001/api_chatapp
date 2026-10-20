@@ -38,6 +38,19 @@ const userSchema = new mongoose.Schema(
       // Group admins' dashboards show how many messages I sent and when I last posted.
       shareGroupActivity: { type: Boolean, default: true },
     },
+    // Who sees my status updates: my contacts (people I saved in ChatApp or chat with one to
+    // one), my contacts except some, or only some of them.
+    statusPrivacy: {
+      type: {
+        _id: false,
+        mode: { type: String, enum: ['contacts', 'except', 'only'], default: 'contacts' },
+        except: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+        only: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+      },
+      default: undefined,
+    },
+    // People whose status updates I muted (they stay, at the bottom of my list).
+    statusMuted: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], default: undefined },
     // People this user saved in ChatApp (their own contact list, kept on every device).
     contacts: {
       type: [

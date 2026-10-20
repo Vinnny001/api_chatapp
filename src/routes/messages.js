@@ -8,7 +8,7 @@ import {
   User,
   canSend,
   createSystemMessage,
-  findConversationForUser,
+  findChatForUser,
   userLabel,
   pushReaction,
   pushReactionRemoved,
@@ -41,7 +41,7 @@ router.post(
   '/:id/star',
   handle(async (req, res) => {
     const message = await Message.findById(req.params.id);
-    if (!message || !(await findConversationForUser(message.conversation, req.userId))) {
+    if (!message || !(await findChatForUser(message.conversation, req.userId))) {
       throw new HttpError(404, 'Message not found');
     }
     const starred = message.starredBy.some((u) => sameId(u, req.userId));
@@ -63,7 +63,7 @@ router.post(
   '/:id/open',
   handle(async (req, res) => {
     const message = await Message.findById(req.params.id);
-    const conv = message && (await findConversationForUser(message.conversation, req.userId));
+    const conv = message && (await findChatForUser(message.conversation, req.userId));
     if (!conv || !message.viewOnce) throw new HttpError(404, 'Message not found');
     if (sameId(message.sender, req.userId)) throw new HttpError(403, 'You can’t open a view once message you sent');
     const url = message.media?.url;
@@ -88,7 +88,7 @@ router.post(
   handle(async (req, res) => {
     const { options } = z.object({ options: z.array(z.string().max(4)).max(12) }).parse(req.body);
     const message = await Message.findById(req.params.id);
-    const conv = message && (await findConversationForUser(message.conversation, req.userId));
+    const conv = message && (await findChatForUser(message.conversation, req.userId));
     if (!conv || !message.poll?.options?.length || message.deletedForEveryone) throw new HttpError(404, 'Poll not found');
     const valid = new Set(message.poll.options.map((o) => o.id));
     const picked = [...new Set(options)].filter((o) => valid.has(o));
@@ -121,7 +121,7 @@ router.post(
   '/:id/pin',
   handle(async (req, res) => {
     const message = await Message.findById(req.params.id);
-    const conv = message && (await findConversationForUser(message.conversation, req.userId));
+    const conv = message && (await findChatForUser(message.conversation, req.userId));
     if (!conv) throw new HttpError(404, 'Message not found');
     if (message.deletedForEveryone || message.type === 'system') throw new HttpError(400, 'This message can not be pinned');
     if (!canSend(conv, req.userId)) throw new HttpError(403, 'Only admins can pin messages in this group');
@@ -141,7 +141,7 @@ router.delete(
   '/:id/pin',
   handle(async (req, res) => {
     const message = await Message.findById(req.params.id, 'conversation');
-    const conv = message && (await findConversationForUser(message.conversation, req.userId));
+    const conv = message && (await findChatForUser(message.conversation, req.userId));
     if (!conv) throw new HttpError(404, 'Message not found');
     if (!canSend(conv, req.userId)) throw new HttpError(403, 'Only admins can unpin messages in this group');
     conv.pinned = (conv.pinned || []).filter((p) => String(p.message) !== String(message._id));

@@ -16,7 +16,7 @@ import {
   pushNewMessage,
   pushRead,
   escapeRegex,
-  findConversationForUser,
+  findChatForUser,
   groupPermissions,
   publicUser,
   sameId,
@@ -72,9 +72,9 @@ const prefsSchema = z.object({
 const router = Router();
 
 async function loadForUser(req) {
-  const conv = await findConversationForUser(req.params.id, req.userId);
+  const conv = await findChatForUser(req.params.id, req.userId);
   // (The hidden own-devices channel isn't a chat: none of the chat routes apply to it.)
-  if (!conv || conv.type === 'self') throw new HttpError(404, 'Conversation not found');
+  if (!conv) throw new HttpError(404, 'Conversation not found');
   return conv;
 }
 
@@ -106,7 +106,7 @@ router.get(
   '/',
   handle(async (req, res) => {
     const convs = await withConversationRefs(
-      Conversation.find({ 'participants.user': req.userId, type: { $ne: 'self' } }).sort({ lastMessageAt: -1 })
+      Conversation.find({ 'participants.user': req.userId, type: { $in: ['direct', 'group'] } }).sort({ lastMessageAt: -1 })
     );
     res.json({ conversations: convs.map((c) => serializeConversation(c, req.userId, { historyFrom: req.historyFrom })) });
   })
@@ -154,7 +154,7 @@ router.get(
     const kind = SHARED_KINDS.includes(req.query.kind) ? req.query.kind : 'all';
     const limit = Math.min(Number(req.query.limit) || 60, 100);
     const conversations = req.query.conversationId
-      ? [await findConversationForUser(String(req.query.conversationId), req.userId)].filter(Boolean)
+      ? [await findChatForUser(String(req.query.conversationId), req.userId)].filter(Boolean)
       : await Conversation.find({ 'participants.user': req.userId }, 'type participants');
     if (!conversations.length) return res.json({ items: [], hasMore: false });
 

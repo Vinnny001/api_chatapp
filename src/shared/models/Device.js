@@ -21,6 +21,9 @@ const deviceSchema = new mongoose.Schema(
     pushToken: { type: String, default: undefined }, // this device's FCM token, removed with it
     // End-to-end encryption identity: the device's MLS signature public key (base64). Set
     // once; a device never changes it (a new key means a new device).
+    // Status updates are sealed to this key (ECDH P-256 public key, base64url), signed with
+    // the device's encryption identity so the server can't substitute its own.
+    statusKey: { type: { _id: false, pub: String, sig: String }, default: undefined },
     mlsKey: { type: String, default: undefined },
     // Sync with my other devices (history + contacts)? Undecided until the user chooses on a
     // new device. Not syncing: this device sees only messages from `historyFrom` (its sign-in) on.
