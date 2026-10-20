@@ -14,6 +14,7 @@ import deviceRoutes from './routes/devices.js';
 import mlsRoutes from './routes/mls.js';
 import statusRoutes from './routes/status.js';
 import supportRoutes from './routes/support.js';
+import linkRoutes, { assetLinks, chatLinkPage } from './routes/chatLinks.js';
 import { revokePage } from './routes/revokePage.js';
 import messageRoutes from './routes/messages.js';
 import uploadRoutes, { serveStoredFile, serveUploads } from './routes/uploads.js';
@@ -31,6 +32,8 @@ export function createApp() {
   app.use('/uploads', serveUploads);
   app.get('/files/:id/:name', serveStoredFile);
   app.get('/join/:code', invitePage);
+  app.get('/chat/:who', chatLinkPage); // "chat with me" links
+  app.get('/.well-known/assetlinks.json', assetLinks); // Android opens those links in the app
   app.get('/devices/revoke/:token', revokePage);
   app.post('/devices/revoke/:token', revokePage);
   app.use('/api/uploads', uploadRoutes);
@@ -45,6 +48,7 @@ export function createApp() {
   app.use('/api/mls', requireAuth, mlsRoutes);
   app.use('/api/status', requireAuth, statusRoutes);
   app.use('/api/support', requireAuth, supportRoutes);
+  app.use('/api/links', requireAuth, linkRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
