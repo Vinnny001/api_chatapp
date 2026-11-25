@@ -36,6 +36,7 @@ export const EVENTS = {
   STATUS_NEW: 'status:new', // someone I may see posted a status update: { userId, id }
   STATUS_REMOVED: 'status:removed', // it was deleted: { userId, id }
   STATUS_VIEW: 'status:view', // (to its author) someone viewed my status: { id, user, at }
+  SCHEDULED: 'scheduled:update', // (to its sender) a scheduled message was sent, changed or cancelled
   CALL_INCOMING: 'call:incoming',
   CALL_ACCEPTED: 'call:accepted',
   CALL_REJECTED: 'call:rejected',

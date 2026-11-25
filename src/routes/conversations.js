@@ -29,6 +29,7 @@ import {
 } from '#shared';
 import { HttpError, handle } from '../middleware/errors.js';
 import { uploadUrl } from './users.js';
+import { ScheduledMessage } from '../models/ScheduledMessage.js';
 import {
   broadcastConversation,
   broadcastMessage,
@@ -795,6 +796,43 @@ const sendSchema = z
   .refine((d) => !d.viewOnce || d.type === 'image' || d.type === 'video' || (d.e2ee && d.media), 'Only photos and videos can be view once');
 
 /**
+ * Sends a message as `userId` from `deviceId` (checked as for any send). Used by the HTTP send
+ * route and by scheduled messages when they're due. → { message, duplicate }.
+ */
+async function sendAs({ conv, userId, deviceId, data }) {
+  if (!canSend(conv, userId)) throw new HttpError(403, 'Only admins can send messages to this group');
+  const replyTo =
+    data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conv._id })) ? data.replyTo : null;
+  const block = await blockStatus(conv, userId);
+  if (block.iBlocked) throw new HttpError(403, 'You blocked this contact. Unblock them to send a message.');
+  // Every message is end-to-end encrypted: plaintext is refused (an old or tampered app).
+  if (!data.e2ee) throw new HttpError(409, 'Messages must be end-to-end encrypted. Update ChatApp to send messages.');
+  if (data.e2ee && !deviceId) throw new HttpError(400, 'Update ChatApp to send encrypted messages.');
+  const { message, duplicate } = await createMessage({
+    conversation: conv,
+    senderId: userId,
+    type: data.type,
+    text: data.text,
+    media: data.media,
+    replyTo,
+    forwarded: data.forwarded,
+    viewOnce: data.viewOnce,
+    poll: data.poll,
+    pollMeta: data.pollMeta,
+    ...(data.e2ee && { e2ee: { ...data.e2ee, device: deviceId }, mentionIds: data.mentions || [] }),
+    clientId: data.clientId,
+    hiddenFrom: block.blockedMe ? [block.peerId] : [], // they blocked me: never reaches them
+  });
+  if (!duplicate && block.blockedMe) {
+    emitToUser(userId, EVENTS.MESSAGE_NEW, serializeMessage(message));
+  } else if (!duplicate) {
+    broadcastMessage(message, conv);
+    pushNewMessage(message, conv);
+  }
+  return { message, duplicate };
+}
+
+/**
  * Send over plain HTTP. The app normally sends through the realtime socket; this is used
  * by the Android background worker to deliver queued messages while the app is closed.
  * Same clientId = same message, so a message sent both ways is only stored once.
@@ -804,39 +842,138 @@ router.post(
   handle(async (req, res) => {
     const data = sendSchema.parse(req.body);
     const conv = await loadForUser(req);
-    if (!canSend(conv, req.userId)) throw new HttpError(403, 'Only admins can send messages to this group');
-
-    const replyTo =
-      data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conv._id })) ? data.replyTo : null;
-    const block = await blockStatus(conv, req.userId);
-    if (block.iBlocked) throw new HttpError(403, 'You blocked this contact. Unblock them to send a message.');
-    // Every message is end-to-end encrypted: plaintext is refused (an old or tampered app).
-    if (!data.e2ee) throw new HttpError(409, 'Messages must be end-to-end encrypted. Update ChatApp to send messages.');
-    if (data.e2ee && !req.deviceId) throw new HttpError(400, 'Update ChatApp to send encrypted messages.');
-    const { message, duplicate } = await createMessage({
-      conversation: conv,
-      senderId: req.userId,
-      type: data.type,
-      text: data.text,
-      media: data.media,
-      replyTo,
-      forwarded: data.forwarded,
-      viewOnce: data.viewOnce,
-      poll: data.poll,
-      pollMeta: data.pollMeta,
-      ...(data.e2ee && { e2ee: { ...data.e2ee, device: req.deviceId }, mentionIds: data.mentions || [] }),
-      clientId: data.clientId,
-      hiddenFrom: block.blockedMe ? [block.peerId] : [], // they blocked me: never reaches them
-    });
-    if (!duplicate && block.blockedMe) {
-      emitToUser(req.userId, EVENTS.MESSAGE_NEW, serializeMessage(message));
-    } else if (!duplicate) {
-      broadcastMessage(message, conv);
-      pushNewMessage(message, conv);
-    }
+    const { message, duplicate } = await sendAs({ conv, userId: req.userId, deviceId: req.deviceId, data });
     res.status(duplicate ? 200 : 201).json({ message: serializeMessage(message, req.userId), duplicate });
   })
 );
+
+// ---------------------------------------------------------------- scheduled messages
+
+const SCHEDULE_MAX_MS = 30 * 24 * 3600 * 1000; // up to 30 days ahead (keys stay readable that long)
+const serializeScheduled = (s) => ({
+  id: String(s._id),
+  conversationId: String(s.conversation),
+  sendAt: s.sendAt,
+  clientId: s.body?.clientId,
+  device: s.device,
+  state: s.state,
+  error: s.error,
+  createdAt: s.createdAt,
+});
+const sendAtSchema = z.coerce
+  .date()
+  .refine((d) => +d > Date.now() + 20_000, 'Choose a time in the future')
+  .refine((d) => +d < Date.now() + SCHEDULE_MAX_MS, 'Messages can be scheduled up to 30 days ahead');
+
+/** Schedule a message (already encrypted on the phone): { sendAt, message: <as POST /messages> }. */
+router.post(
+  '/:id/scheduled',
+  handle(async (req, res) => {
+    const { sendAt, message } = z.object({ sendAt: sendAtSchema, message: sendSchema }).parse(req.body);
+    const conv = await loadForUser(req);
+    if (!canSend(conv, req.userId)) throw new HttpError(403, 'Only admins can send messages to this group');
+    if (!message.e2ee || !req.deviceId) throw new HttpError(409, 'Messages must be end-to-end encrypted. Update ChatApp to send messages.');
+    if ((await ScheduledMessage.countDocuments({ sender: req.userId, state: { $ne: 'failed' } })) >= 100) {
+      throw new HttpError(400, 'You have 100 scheduled messages already');
+    }
+    const s = await ScheduledMessage.create({ conversation: conv._id, sender: req.userId, device: req.deviceId, sendAt, body: message });
+    emitToUser(req.userId, EVENTS.SCHEDULED, { conversationId: String(conv._id) });
+    res.status(201).json({ scheduled: serializeScheduled(s) });
+  })
+);
+
+/** My scheduled messages in this chat (soonest first). */
+router.get(
+  '/:id/scheduled',
+  handle(async (req, res) => {
+    const conv = await loadForUser(req);
+    const list = await ScheduledMessage.find({ conversation: conv._id, sender: req.userId }).sort({ sendAt: 1 }).lean();
+    res.json({ scheduled: list.map(serializeScheduled) });
+  })
+);
+
+/** Change when it goes out: { sendAt }. */
+router.patch(
+  '/:id/scheduled/:sid',
+  handle(async (req, res) => {
+    const { sendAt } = z.object({ sendAt: sendAtSchema }).parse(req.body);
+    const conv = await loadForUser(req);
+    if (!mongoose.isValidObjectId(req.params.sid)) throw new HttpError(404, 'Scheduled message not found');
+    const s = await ScheduledMessage.findOneAndUpdate(
+      { _id: req.params.sid, conversation: conv._id, sender: req.userId, state: { $in: ['pending', 'failed'] } },
+      { $set: { sendAt, state: 'pending', error: null } },
+      { new: true }
+    );
+    if (!s) throw new HttpError(404, 'Scheduled message not found (it may have been sent already)');
+    emitToUser(req.userId, EVENTS.SCHEDULED, { conversationId: String(conv._id) });
+    res.json({ scheduled: serializeScheduled(s) });
+  })
+);
+
+/** Cancel it. */
+router.delete(
+  '/:id/scheduled/:sid',
+  handle(async (req, res) => {
+    const conv = await loadForUser(req);
+    if (!mongoose.isValidObjectId(req.params.sid)) throw new HttpError(404, 'Scheduled message not found');
+    const r = await ScheduledMessage.deleteOne({ _id: req.params.sid, conversation: conv._id, sender: req.userId, state: { $ne: 'sending' } });
+    if (!r.deletedCount) throw new HttpError(404, 'Scheduled message not found (it may have been sent already)');
+    emitToUser(req.userId, EVENTS.SCHEDULED, { conversationId: String(conv._id) });
+    res.json({ ok: true });
+  })
+);
+
+/** Sends one due scheduled message (claimed by this process). */
+async function deliverScheduled(s) {
+  const conversationId = String(s.conversation);
+  const sender = String(s.sender);
+  try {
+    const conv = await findChatForUser(conversationId, sender);
+    if (!conv) throw new HttpError(403, 'You’re no longer in this chat');
+    const data = sendSchema.parse(s.body);
+    const { message } = await sendAs({ conv, userId: sender, deviceId: s.device, data });
+    await ScheduledMessage.deleteOne({ _id: s._id });
+    emitToUser(sender, EVENTS.SCHEDULED, { conversationId, sent: String(s._id), messageId: String(message._id) });
+  } catch (err) {
+    // A reason that won't change (removed from the group, blocked...): keep it, marked with why.
+    const permanent = err instanceof HttpError || err instanceof z.ZodError;
+    await ScheduledMessage.updateOne({ _id: s._id }, { $set: permanent ? { state: 'failed', error: err.message } : { state: 'pending' } });
+    emitToUser(sender, EVENTS.SCHEDULED, { conversationId });
+    if (!permanent) console.error('[api] scheduled message failed, will retry:', err.message);
+  }
+}
+
+/**
+ * Sends scheduled messages when they're due: checked every 15 s and at start-up, so ones that
+ * came due while the server was asleep go out as soon as it wakes.
+ */
+export function startScheduler() {
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      for (;;) {
+        const s = await ScheduledMessage.findOneAndUpdate(
+          { state: 'pending', sendAt: { $lte: new Date() } },
+          { $set: { state: 'sending' } },
+          { sort: { sendAt: 1 }, new: true }
+        );
+        if (!s) break;
+        await deliverScheduled(s);
+      }
+    } catch (err) {
+      console.error('[api] scheduler:', err.message);
+    } finally {
+      running = false;
+    }
+  };
+  // One being sent when the server stopped goes again (same clientId: never twice).
+  ScheduledMessage.updateMany({ state: 'sending', updatedAt: { $lt: new Date(Date.now() - 120_000) } }, { $set: { state: 'pending' } })
+    .catch(() => {})
+    .finally(tick);
+  setInterval(tick, 15_000).unref();
+}
 
 router.get(
   '/:id/search',
