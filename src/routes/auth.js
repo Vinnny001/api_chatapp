@@ -5,18 +5,20 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import {
   EVENTS,
+  Device,
   User,
   activeDevices,
   config,
   pushLoginRequest,
   pushLoginRequestDone,
+  readTokenIgnoringExpiry,
   signToken,
   usernameProblem,
   verifyAnyToken,
 } from '#shared';
 import { codeEmail, sendEmail } from '../email.js';
 import { LoginRequest } from '../models/LoginRequest.js';
-import { clientIp, revokeDevices, revokeOtherDevices, startSession } from '../devices.js';
+import { clientIp, keepSignedOut, revokeDevices, revokeOtherDevices, startSession } from '../devices.js';
 import { emitToUser } from '../realtime.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, handle } from '../middleware/errors.js';
@@ -183,6 +185,11 @@ router.post(
     if (user.disabled) throw new HttpError(403, 'This account has been disabled. Contact support.');
     if (user.emailVerified === false) return res.json(pendingSession(user, await trySendCode(user, 'verify')));
 
+    // The same phone/browser signing in again after its sign-in ran out (or after logging out
+    // and keeping its chats): it carries on as the same device, with its keys and chats.
+    const resumed = await resumeDevice(user, req.body.resume);
+    if (resumed) return res.json({ token: resumed, user: selfView(user), resumed: true });
+
     const info = deviceOf(req, req.body.device);
     const approvers = await activeDevices(user._id);
     if (!approvers.length) {
@@ -208,6 +215,23 @@ router.post(
     });
   })
 );
+
+/**
+ * Signing in again on a device that was signed in before: `token` is the old login it kept
+ * (expired or logged out with "keep chats"). Works only for that account, and only if the
+ * device wasn't signed out from elsewhere and the password hasn't changed since. → new token or null.
+ */
+async function resumeDevice(user, token) {
+  const payload = typeof token === 'string' && token.length < 2000 ? readTokenIgnoringExpiry(token) : null;
+  if (!payload || payload.sub !== String(user._id)) return null;
+  if (user.sessionsValidAfter && payload.iat * 1000 < user.sessionsValidAfter.getTime()) return null;
+  const device = await Device.findOneAndUpdate(
+    { _id: payload.did, user: user._id, revokedAt: null },
+    { $set: { lastActiveAt: new Date() }, $unset: { signedOutAt: 1 } },
+    { new: true }
+  );
+  return device ? signToken(user._id, { deviceId: device._id }) : null;
+}
 
 // ---- Sign-in approval for a new device
 
@@ -348,13 +372,27 @@ router.delete(
   })
 );
 
-/** Sign out on this device. */
+/**
+ * Sign out on this device. { keep: true }: its chats stay on it for next time (it stays in its
+ * chats' encryption, can't approve sign-ins, and signing in again here resumes it).
+ */
 router.post(
   '/logout',
   requireAuth,
   handle(async (req, res) => {
-    if (req.deviceId) await revokeDevices(req.userId, [req.deviceId]);
+    if (req.deviceId && req.body?.keep === true) await keepSignedOut(req.userId, req.deviceId);
+    else if (req.deviceId) await revokeDevices(req.userId, [req.deviceId]);
     res.json({ ok: true });
+  })
+);
+
+/** A fresh login for this device (the app renews it while it's used, so it never runs out). */
+router.post(
+  '/refresh',
+  requireAuth,
+  handle(async (req, res) => {
+    if (!req.deviceId) throw new HttpError(400, 'Update ChatApp to stay signed in');
+    res.json({ token: signToken(req.userId, { deviceId: req.deviceId }) });
   })
 );
 

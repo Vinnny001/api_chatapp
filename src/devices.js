@@ -50,6 +50,20 @@ export async function revokeDevices(userId, deviceIds) {
   announceRoster(userId).catch(() => {});
 }
 
+/**
+ * Logged out here, keeping its chats: its tokens stop working now and it stops getting
+ * notifications, but it stays in its chats' encryption (signing in again resumes it).
+ */
+export async function keepSignedOut(userId, deviceId) {
+  const device = await Device.findOneAndUpdate(
+    { _id: deviceId, user: userId, revokedAt: null },
+    { $set: { signedOutAt: new Date() }, $unset: { pushToken: 1 } },
+    { projection: { pushToken: 1 } }
+  ).lean();
+  if (device?.pushToken) await User.updateOne({ _id: userId }, { $pull: { devices: { token: device.pushToken } } });
+  disconnectDevices([deviceId]);
+}
+
 /** Everything but `keep`, including tokens from before devices existed. */
 export async function revokeOtherDevices(userId, keep) {
   const others = await Device.find({ user: userId, revokedAt: null, _id: { $ne: keep } }, '_id').lean();

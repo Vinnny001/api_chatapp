@@ -34,6 +34,9 @@ const deviceSchema = new mongoose.Schema(
       default: undefined,
     },
     historyFrom: { type: Date, default: undefined },
+    // Logged out but asked to keep its chats: its tokens stop working and it can't approve
+    // sign-ins, but it stays in its chats' encryption, so signing in again here resumes it.
+    signedOutAt: { type: Date, default: undefined },
     revokedAt: { type: Date, default: null },
   },
   { timestamps: true }

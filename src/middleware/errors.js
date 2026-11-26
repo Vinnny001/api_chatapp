@@ -3,10 +3,11 @@ import { ZodError } from 'zod';
 import multer from 'multer';
 
 export class HttpError extends Error {
-  constructor(status, message, details) {
+  constructor(status, message, details, code) {
     super(message);
     this.status = status;
     this.details = details;
+    this.code = code; // machine-readable reason, e.g. why a sign-in ended
   }
 }
 
@@ -38,7 +39,7 @@ export function errorHandler(err, _req, res, _next) {
     return res.status(409).json({ message: label || 'Already in use' });
   }
   if (err instanceof HttpError) {
-    return res.status(err.status).json({ message: err.message, ...(err.details && { errors: err.details }) });
+    return res.status(err.status).json({ message: err.message, ...(err.details && { errors: err.details }), ...(err.code && { code: err.code }) });
   }
   console.error('[api] unhandled error:', err);
   res.status(500).json({ message: 'Server error' });

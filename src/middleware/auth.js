@@ -1,4 +1,4 @@
-import { authenticate } from '#shared';
+import { check } from '#shared';
 import { HttpError } from './errors.js';
 
 /**
@@ -9,8 +9,9 @@ export async function requireAuth(req, _res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   try {
-    const session = token && (await authenticate(token));
-    if (!session) return next(new HttpError(401, 'Not signed in'));
+    // (The reason tells the app whether to keep this device's chats: see check().)
+    const { session, reason } = await check(token);
+    if (!session) return next(new HttpError(401, 'Not signed in', undefined, reason));
     req.userId = session.userId;
     req.deviceId = session.deviceId;
     req.historyFrom = session.historyFrom; // set on a device that chose not to sync

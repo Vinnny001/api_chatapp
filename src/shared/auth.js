@@ -36,6 +36,28 @@ export function readToken(token) {
   }
 }
 
+/**
+ * Why a token doesn't work by itself: 'expired' (too old) or 'invalid'. (Null when it does.)
+ */
+export function tokenProblem(token) {
+  try {
+    jwt.verify(token, config.jwtSecret);
+    return null;
+  } catch (err) {
+    return err?.name === 'TokenExpiredError' ? 'expired' : 'invalid';
+  }
+}
+
+/** A device token's payload even if it has expired (resuming a device), or null. */
+export function readTokenIgnoringExpiry(token) {
+  try {
+    const payload = jwt.verify(token, config.jwtSecret, { ignoreExpiration: true });
+    return payload.pending || typeof payload.sub !== 'string' || !payload.did ? null : payload;
+  } catch {
+    return null;
+  }
+}
+
 /** Like verifyToken, but also accepts pending tokens (email confirmation routes only). */
 export function verifyAnyToken(token) {
   try {
