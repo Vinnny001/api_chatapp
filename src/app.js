@@ -17,9 +17,15 @@ import supportRoutes from './routes/support.js';
 import linkRoutes, { assetLinks, chatLinkPage } from './routes/chatLinks.js';
 import { revokePage } from './routes/revokePage.js';
 import messageRoutes from './routes/messages.js';
+import iceRoutes, { turnProvider } from './routes/iceServers.js';
 import uploadRoutes, { serveStoredFile, serveUploads } from './routes/uploads.js';
 
 export function createApp() {
+  console.log(
+    turnProvider()
+      ? `[api] calls: TURN relay via ${turnProvider()}`
+      : '[api] calls: no TURN relay set (see src/routes/iceServers.js); calls on mobile data may not connect'
+  );
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
@@ -49,6 +55,7 @@ export function createApp() {
   app.use('/api/status', requireAuth, statusRoutes);
   app.use('/api/support', requireAuth, supportRoutes);
   app.use('/api/links', requireAuth, linkRoutes);
+  app.use('/api/calls', requireAuth, iceRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

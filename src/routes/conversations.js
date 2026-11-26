@@ -851,6 +851,7 @@ router.post(
 // ---------------------------------------------------------------- scheduled messages
 
 const SCHEDULE_MAX_MS = 30 * 24 * 3600 * 1000; // up to 30 days ahead (keys stay readable that long)
+const SCHEDULE_PER_CHAT = 3; // waiting at once, per person per chat (failed ones count until deleted)
 const serializeScheduled = (s) => ({
   id: String(s._id),
   conversationId: String(s.conversation),
@@ -907,8 +908,8 @@ router.post(
         return res.json({ scheduled: null, sent: true, duplicate: true });
       }
     }
-    if ((await ScheduledMessage.countDocuments({ sender: req.userId, state: { $ne: 'failed' } })) >= 100) {
-      throw new HttpError(400, 'You have 100 scheduled messages already');
+    if ((await ScheduledMessage.countDocuments({ sender: req.userId, conversation: conv._id })) >= SCHEDULE_PER_CHAT) {
+      throw new HttpError(400, `You can have up to ${SCHEDULE_PER_CHAT} scheduled messages in a chat. Delete one or wait for it to be sent.`);
     }
     const s = await ScheduledMessage.create({
       conversation: conv._id,
