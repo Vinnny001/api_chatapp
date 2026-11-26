@@ -65,6 +65,9 @@ const messageSchema = new mongoose.Schema(
     deletedFor: [{ type: ObjectId, ref: 'User' }],
     deletedForEveryone: { type: Boolean, default: false },
     editedAt: { type: Date, default: null },
+    // A scheduled message whose text was changed before it went out. Only the sender is told
+    // (the others just get the final version).
+    editedBeforeSendAt: { type: Date, default: undefined },
     expiresAt: { type: Date, default: undefined },
     // When each recipient's device got it and when they read it (message info).
     receipts: { type: [{ _id: false, user: { type: ObjectId, ref: 'User' }, deliveredAt: Date, readAt: Date }], default: undefined },

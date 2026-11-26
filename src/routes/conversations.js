@@ -15,6 +15,7 @@ import {
   createSystemMessage,
   pushNewMessage,
   pushRead,
+  pushScheduledSent,
   escapeRegex,
   findChatForUser,
   groupPermissions,
@@ -855,9 +856,12 @@ const serializeScheduled = (s) => ({
   conversationId: String(s.conversation),
   sendAt: s.sendAt,
   clientId: s.body?.clientId,
+  replyTo: s.body?.replyTo ?? null, // (kept when its text is changed)
   device: s.device,
   state: s.state,
   error: s.error,
+  editedAt: s.editedAt ?? null,
+  version: s.updatedAt, // sent back with a change, so two devices can't overwrite each other
   createdAt: s.createdAt,
 });
 const sendAtSchema = z.coerce
@@ -871,7 +875,8 @@ router.post(
   handle(async (req, res) => {
     // `offline`: scheduled on a phone without a connection, handed over now. Its time may have
     // passed meanwhile; then it goes out straight away.
-    const { offline } = z.object({ offline: z.boolean().optional() }).parse(req.body);
+    // `edited`: its text was changed on the phone before it was handed over.
+    const { offline, edited } = z.object({ offline: z.boolean().optional(), edited: z.boolean().optional() }).parse(req.body);
     const { sendAt: when, message } = z
       .object({ sendAt: offline ? z.coerce.date().refine((d) => +d < Date.now() + SCHEDULE_MAX_MS, 'Messages can be scheduled up to 30 days ahead') : sendAtSchema, message: sendSchema })
       .parse(req.body);
@@ -882,7 +887,22 @@ router.post(
     // The same one handed over twice (the app and the phone's background sender): keep one.
     if (message.clientId) {
       const same = await ScheduledMessage.findOne({ sender: req.userId, 'body.clientId': message.clientId });
-      if (same) return res.json({ scheduled: serializeScheduled(same), duplicate: true });
+      if (same) {
+        // Handed over earlier (by the background sender), then changed on the phone: take the change.
+        const changed = edited && same.state !== 'sending' && same.body?.e2ee?.ciphertext !== message.e2ee.ciphertext;
+        const updated = changed
+          ? await ScheduledMessage.findOneAndUpdate(
+              { _id: same._id, state: same.state, updatedAt: same.updatedAt },
+              { $set: { body: message, device: req.deviceId, sendAt, editedAt: new Date(), state: 'pending', error: null } },
+              { new: true }
+            )
+          : null;
+        if (updated) {
+          emitToUser(req.userId, EVENTS.SCHEDULED, { conversationId: String(conv._id) });
+          if (+sendAt <= Date.now() + 1000) kickScheduler();
+        }
+        return res.json({ scheduled: serializeScheduled(updated || same), duplicate: true });
+      }
       if (await Message.exists({ sender: req.userId, clientId: message.clientId })) {
         return res.json({ scheduled: null, sent: true, duplicate: true });
       }
@@ -890,7 +910,14 @@ router.post(
     if ((await ScheduledMessage.countDocuments({ sender: req.userId, state: { $ne: 'failed' } })) >= 100) {
       throw new HttpError(400, 'You have 100 scheduled messages already');
     }
-    const s = await ScheduledMessage.create({ conversation: conv._id, sender: req.userId, device: req.deviceId, sendAt, body: message });
+    const s = await ScheduledMessage.create({
+      conversation: conv._id,
+      sender: req.userId,
+      device: req.deviceId,
+      sendAt,
+      body: message,
+      ...(edited && { editedAt: new Date() }),
+    });
     emitToUser(req.userId, EVENTS.SCHEDULED, { conversationId: String(conv._id) });
     if (+sendAt <= Date.now() + 1000) kickScheduler();
     return res.status(201).json({ scheduled: serializeScheduled(s) });
@@ -907,19 +934,51 @@ router.get(
   })
 );
 
-/** Change when it goes out: { sendAt }. */
+/**
+ * Change it before it goes out: { sendAt?, message?, version? }. `message` is the new text,
+ * encrypted again on the phone (same clientId). `version` (from the list) refuses the change
+ * if it was changed meanwhile on another device.
+ */
 router.patch(
   '/:id/scheduled/:sid',
   handle(async (req, res) => {
-    const { sendAt } = z.object({ sendAt: sendAtSchema }).parse(req.body);
+    const { sendAt, message, version } = z
+      .object({ sendAt: sendAtSchema.optional(), message: sendSchema.optional(), version: z.coerce.date().optional() })
+      .refine((d) => d.sendAt || d.message, 'Nothing to change')
+      .parse(req.body);
     const conv = await loadForUser(req);
     if (!mongoose.isValidObjectId(req.params.sid)) throw new HttpError(404, 'Scheduled message not found');
+    const current = await ScheduledMessage.findOne({ _id: req.params.sid, conversation: conv._id, sender: req.userId });
+    const gone = 'Scheduled message not found (it may have been sent already)';
+    if (!current) throw new HttpError(404, gone);
+    if (current.state === 'sending') throw new HttpError(409, 'It’s being sent right now, so it can’t be changed');
+    if (version && +version !== +current.updatedAt) {
+      throw new HttpError(409, 'It was changed on another of your devices. Check it and try again.');
+    }
+    const set = { state: 'pending', error: null };
+    if (sendAt) set.sendAt = sendAt;
+    if (message) {
+      if (!canSend(conv, req.userId)) throw new HttpError(403, 'Only admins can send messages to this group');
+      if (!message.e2ee || !req.deviceId) throw new HttpError(409, 'Messages must be end-to-end encrypted. Update ChatApp to send messages.');
+      if (message.clientId !== current.body?.clientId) throw new HttpError(400, 'That’s a different message');
+      // Too close to its time to change safely (unless it's being moved later too).
+      if (!sendAt && current.state === 'pending' && +current.sendAt < Date.now() + 5000) {
+        throw new HttpError(409, 'It’s being sent right now, so it can’t be changed');
+      }
+      set.body = message;
+      set.device = req.deviceId; // the device that encrypted this version
+      set.editedAt = new Date();
+    }
+    // Only if nothing happened to it since it was read above (the scheduler claims it by state).
     const s = await ScheduledMessage.findOneAndUpdate(
-      { _id: req.params.sid, conversation: conv._id, sender: req.userId, state: { $in: ['pending', 'failed'] } },
-      { $set: { sendAt, state: 'pending', error: null } },
+      { _id: current._id, state: current.state, updatedAt: current.updatedAt },
+      { $set: set },
       { new: true }
     );
-    if (!s) throw new HttpError(404, 'Scheduled message not found (it may have been sent already)');
+    if (!s) {
+      const now = await ScheduledMessage.findById(current._id, 'state').lean();
+      throw new HttpError(now ? 409 : 404, now ? 'It changed just now (being sent, or edited elsewhere). Try again.' : gone);
+    }
     emitToUser(req.userId, EVENTS.SCHEDULED, { conversationId: String(conv._id) });
     res.json({ scheduled: serializeScheduled(s) });
   })
@@ -946,9 +1005,17 @@ async function deliverScheduled(s) {
     const conv = await findChatForUser(conversationId, sender);
     if (!conv) throw new HttpError(403, 'You’re no longer in this chat');
     const data = sendSchema.parse(s.body);
-    const { message } = await sendAs({ conv, userId: sender, deviceId: s.device, data });
+    const { message, duplicate } = await sendAs({ conv, userId: sender, deviceId: s.device, data });
+    if (s.editedAt && !duplicate) {
+      // Edited before it went out: only the sender sees that (on all their devices).
+      await Message.updateOne({ _id: message._id }, { $set: { editedBeforeSendAt: s.editedAt } });
+      // (A moment later: the sender's apps decrypt and add the new message first.)
+      const patch = { id: String(message._id), conversationId, editedBeforeSendAt: s.editedAt };
+      setTimeout(() => emitToUser(sender, EVENTS.MESSAGE_UPDATED, patch), 2500).unref();
+    }
     await ScheduledMessage.deleteOne({ _id: s._id });
-    emitToUser(sender, EVENTS.SCHEDULED, { conversationId, sent: String(s._id), messageId: String(message._id) });
+    emitToUser(sender, EVENTS.SCHEDULED, { conversationId, sent: String(s._id), clientId: data.clientId, messageId: String(message._id) });
+    if (!duplicate) pushScheduledSent(message, conv);
   } catch (err) {
     // A reason that won't change (removed from the group, blocked...): keep it, marked with why.
     const permanent = err instanceof HttpError || err instanceof z.ZodError;

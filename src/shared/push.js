@@ -137,6 +137,28 @@ export const pushNewMessage = safely(async (message, conversation) => {
   await pushData(recipientIds, data);
 });
 
+/** One of my scheduled messages went out: tell my phones ("Scheduled message sent to Bob"). */
+export const pushScheduledSent = safely(async (message, conversation) => {
+  const senderId = idOf(message.sender);
+  const isGroup = conversation.type === 'group';
+  const peer = isGroup ? null : conversation.participants.find((p) => idOf(p.user) !== senderId);
+  const peerUser = peer ? await User.findById(idOf(peer.user), 'username phone avatarUrl').lean() : null;
+  await pushData(
+    [senderId],
+    {
+      type: 'scheduled_sent',
+      conversationId: idOf(conversation),
+      messageId: idOf(message),
+      isGroup: isGroup ? '1' : '0',
+      peerId: peer ? idOf(peer.user) : '',
+      chatTitle: isGroup ? conversation.name : userLabel(peerUser),
+      chatAvatar: isGroup ? conversation.avatarUrl : peerUser?.avatarUrl,
+      sentAt: new Date(message.createdAt).getTime(),
+    },
+    { ttlSeconds: 24 * 3600 }
+  );
+});
+
 /** Someone reacted to my message: "Reacted 👍 to: …" (only the message's author is told). */
 export const pushReaction = safely(async ({ message, conversation, reactorId, emoji, preview }) => {
   const authorId = idOf(message.sender);

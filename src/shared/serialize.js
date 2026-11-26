@@ -108,6 +108,8 @@ export function serializeMessage(m, viewerId) {
     createdAt: m.createdAt,
   };
   if (viewerId) out.starred = (m.starredBy || []).some((u) => sameId(u, viewerId));
+  // Edited while scheduled: for the sender's eyes only.
+  if (m.editedBeforeSendAt && viewerId && sameId(m.sender, viewerId)) out.editedBeforeSendAt = m.editedBeforeSendAt;
   return out;
 }
 

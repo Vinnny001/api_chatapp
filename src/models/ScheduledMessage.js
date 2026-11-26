@@ -11,6 +11,7 @@ const scheduledMessageSchema = new mongoose.Schema(
     body: { type: mongoose.Schema.Types.Mixed, required: true }, // what POST /messages takes
     state: { type: String, enum: ['pending', 'sending', 'failed'], default: 'pending' },
     error: { type: String, default: null },
+    editedAt: { type: Date, default: null }, // its text was changed after it was scheduled
   },
   { timestamps: true }
 );
