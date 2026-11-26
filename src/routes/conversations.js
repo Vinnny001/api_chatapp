@@ -869,16 +869,31 @@ const sendAtSchema = z.coerce
 router.post(
   '/:id/scheduled',
   handle(async (req, res) => {
-    const { sendAt, message } = z.object({ sendAt: sendAtSchema, message: sendSchema }).parse(req.body);
+    // `offline`: scheduled on a phone without a connection, handed over now. Its time may have
+    // passed meanwhile; then it goes out straight away.
+    const { offline } = z.object({ offline: z.boolean().optional() }).parse(req.body);
+    const { sendAt: when, message } = z
+      .object({ sendAt: offline ? z.coerce.date().refine((d) => +d < Date.now() + SCHEDULE_MAX_MS, 'Messages can be scheduled up to 30 days ahead') : sendAtSchema, message: sendSchema })
+      .parse(req.body);
+    const sendAt = new Date(Math.max(+when, Date.now()));
     const conv = await loadForUser(req);
     if (!canSend(conv, req.userId)) throw new HttpError(403, 'Only admins can send messages to this group');
     if (!message.e2ee || !req.deviceId) throw new HttpError(409, 'Messages must be end-to-end encrypted. Update ChatApp to send messages.');
+    // The same one handed over twice (the app and the phone's background sender): keep one.
+    if (message.clientId) {
+      const same = await ScheduledMessage.findOne({ sender: req.userId, 'body.clientId': message.clientId });
+      if (same) return res.json({ scheduled: serializeScheduled(same), duplicate: true });
+      if (await Message.exists({ sender: req.userId, clientId: message.clientId })) {
+        return res.json({ scheduled: null, sent: true, duplicate: true });
+      }
+    }
     if ((await ScheduledMessage.countDocuments({ sender: req.userId, state: { $ne: 'failed' } })) >= 100) {
       throw new HttpError(400, 'You have 100 scheduled messages already');
     }
     const s = await ScheduledMessage.create({ conversation: conv._id, sender: req.userId, device: req.deviceId, sendAt, body: message });
     emitToUser(req.userId, EVENTS.SCHEDULED, { conversationId: String(conv._id) });
-    res.status(201).json({ scheduled: serializeScheduled(s) });
+    if (+sendAt <= Date.now() + 1000) kickScheduler();
+    return res.status(201).json({ scheduled: serializeScheduled(s) });
   })
 );
 
@@ -947,9 +962,13 @@ async function deliverScheduled(s) {
  * Sends scheduled messages when they're due: checked every 15 s and at start-up, so ones that
  * came due while the server was asleep go out as soon as it wakes.
  */
+let tick = () => {};
+/** Sends what's due now (a message scheduled offline whose time has passed) without waiting. */
+const kickScheduler = () => setImmediate(() => tick());
+
 export function startScheduler() {
   let running = false;
-  const tick = async () => {
+  tick = async () => {
     if (running) return;
     running = true;
     try {

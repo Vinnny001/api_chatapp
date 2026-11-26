@@ -15,6 +15,7 @@ const scheduledMessageSchema = new mongoose.Schema(
   { timestamps: true }
 );
 scheduledMessageSchema.index({ state: 1, sendAt: 1 });
+scheduledMessageSchema.index({ sender: 1, 'body.clientId': 1 });
 
 export const ScheduledMessage =
   mongoose.models.ScheduledMessage || mongoose.model('ScheduledMessage', scheduledMessageSchema);
