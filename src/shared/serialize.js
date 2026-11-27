@@ -103,6 +103,7 @@ export function serializeMessage(m, viewerId) {
     ...(m.viewOnce && { viewOnce: true, openedBy: (m.openedBy || []).map(idOf) }),
     ...(m.poll?.options?.length && !deleted && { poll: serializePoll(m.poll) }),
     deletedForEveryone: deleted,
+    ...(m.uploading && !deleted && { uploading: true }), // its file is still on the way
     editedAt: m.editedAt ?? null,
     expiresAt: m.expiresAt ?? null,
     createdAt: m.createdAt,

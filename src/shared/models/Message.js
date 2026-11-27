@@ -68,6 +68,10 @@ const messageSchema = new mongoose.Schema(
     // A scheduled message whose text was changed before it went out. Only the sender is told
     // (the others just get the final version).
     editedBeforeSendAt: { type: Date, default: undefined },
+    // A photo/video/file sent with its place in the chat kept while it uploads (so a big video
+    // stays where the sender put it): the encrypted content says what's coming; the sender
+    // fills in the file when the upload finishes (message:complete).
+    uploading: { type: Boolean, default: undefined },
     expiresAt: { type: Date, default: undefined },
     // When each recipient's device got it and when they read it (message info).
     receipts: { type: [{ _id: false, user: { type: ObjectId, ref: 'User' }, deliveredAt: Date, readAt: Date }], default: undefined },

@@ -74,6 +74,7 @@ export async function createMessage({
   call,
   countsAsUnread = true, // false for call log entries the recipient already saw (answered/declined)
   hiddenFrom = [], // people who must never see it (they blocked the sender)
+  uploading = false, // a photo/video/file keeping its place in the chat while it uploads
 }) {
   // @mentions: only members of this group, never the sender.
   const members = new Set(conversation.participants.map((p) => idOf(p.user)));
@@ -120,6 +121,7 @@ export async function createMessage({
       expiresAt,
       ...(mentions.length && { mentions }),
       ...(e2ee && { e2ee, text: '' }),
+      ...(e2ee && uploading && { uploading: true }),
       ...(hiddenFrom.length && { deletedFor: hiddenFrom }),
     });
   } catch (err) {
